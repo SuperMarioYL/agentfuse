@@ -1,0 +1,14 @@
+# ~/.fuse/accounts.toml — named API keys, single user, local only.
+# Mode 0600. AgentFuse never transmits these anywhere except the configured upstream.
+
+[accounts.personal]
+provider = "anthropic"
+api_key  = "sk-ant-PERSONAL-place-real-key-here"
+
+[accounts.work]
+provider = "anthropic"
+api_key  = "sk-ant-WORK-place-real-key-here"
+
+[accounts.openai-personal]
+provider = "openai"
+api_key  = "sk-OPENAI-place-real-key-here"
