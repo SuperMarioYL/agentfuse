@@ -6,6 +6,76 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-18
+
+Single milestone `m4_v2_widen` from `mvp_plan_v0.2.0.md`. Adds three new
+provider handlers, a local tokenizer fallback for streams that omit the
+upstream `usage` block, and an externalized price table the user can override
+without recompiling.
+
+### Added
+
+#### m4 — widen the wedge to five provider families
+- **Gemini handler** (`internal/proxy/gemini.go`): forwards
+  `:generateContent` and `:streamGenerateContent` to
+  `generativelanguage.googleapis.com` (or a user-supplied `upstream_url`),
+  parses `usageMetadata` on both unary and SSE-stream responses, and rewrites
+  the `?key=` query param + `x-goog-api-key` header when an account guard is
+  configured.
+- **DeepSeek handler** (`internal/proxy/deepseek.go`): OpenAI-shape wire
+  format with one twist — DeepSeek emits `usage` on the final SSE frame even
+  when the client did NOT pass `stream_options.include_usage = true`. The
+  handler prefers that block when present and falls back to tiktoken when
+  absent.
+- **OpenAI-compat catch-all** (`internal/proxy/openai_compat.go`): routed via
+  `provider = "openai_compat"` + a required `upstream_url` in `.fuse.toml`.
+  Designed for Groq / Mistral / xAI / Together / OpenRouter and any future
+  OpenAI-shape host. Falls through to the tiktoken fallback whenever upstream
+  omits `usage` (which is the common case on Groq + Together streams).
+
+#### Local tokenizer fallback
+- New `internal/tokens` package wraps `github.com/pkoukk/tiktoken-go`.
+  `EstimatePrompt` returns the BPE-encoded prompt size; `EstimateCompletion`
+  does the same for the completion and **rounds UP to the nearest 100
+  tokens** — under-billing is unacceptable for a kill-switch, an over-estimate
+  by a few percent is the price of safety.
+
+#### Externalized price table
+- New `internal/prices` package + `assets/prices.toml`. The bundled snapshot
+  is embedded into the binary via `//go:embed`; the user can override any key
+  by dropping `~/.fuse/prices.toml`. User keys always win, missing keys fall
+  back to the bundle, and missing-in-both falls back to a conservative
+  high-tier `FallbackEntry` so unknown models err toward DENY rather than
+  silently slip past the cap.
+- Initial table covers Anthropic, OpenAI, Gemini, DeepSeek, and OpenAI-compat
+  aliases (Llama 3.1 / 3.3, Mistral Large, Mixtral, Grok-2, Qwen 2.5).
+
+#### Configuration + launcher
+- `.fuse.toml` schema extended with `provider` (defaults to `"anthropic"` for
+  v0.1 configs) and an optional `upstream_url`.
+- `fuse run` now sets `GEMINI_API_BASE` / `GOOGLE_API_BASE`,
+  `DEEPSEEK_API_BASE`, or an `openai_compat`-routed `OPENAI_BASE_URL`
+  depending on the configured provider — wrapping any of Aider, Cline,
+  Continue, or a curl-loop transparently.
+- Example configs: `examples/.fuse.toml.gemini`,
+  `examples/.fuse.toml.deepseek`, `examples/.fuse.toml.openai-compat`.
+
+### Tests
+- `internal/proxy/gemini_test.go`, `deepseek_test.go`,
+  `openai_compat_test.go` (request → upstream stub → ledger row).
+- `internal/tokens/tiktoken_test.go` (round-up rule + encoding selection).
+- `internal/prices/config_test.go` (bundle load, longest-prefix match, user
+  override merge).
+
+### Infrastructure
+- Added `github.com/pkoukk/tiktoken-go v0.1.7` to `go.mod`.
+
+### Known limitations (still out of scope per `mvp_plan_v0.2.0.md` §6)
+- No remote price-fetcher — users edit `~/.fuse/prices.toml` by hand.
+- No web UI or hosted dashboard.
+- No per-tool fine-grained quotas.
+- No Windows native build (WSL2 only).
+
 ## [0.1.0] — 2026-05-17
 
 First runnable scaffold. Milestones m1 + m2 + m3 from `mvp_plan.md` all land in

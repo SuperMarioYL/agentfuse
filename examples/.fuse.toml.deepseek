@@ -1,0 +1,14 @@
+# .fuse.toml — DeepSeek routing example.
+# Drop at your project root, then run any OpenAI-shape client whose base URL
+# you can override (Aider, Cline, Continue …) and point it at
+#   $DEEPSEEK_API_BASE/v1/chat/completions
+# `fuse run` injects that env var for you when provider = "deepseek".
+
+cap_usd  = 5.0
+window   = "project"
+account  = "personal"
+provider = "deepseek"
+
+# upstream_url is optional. Default: https://api.deepseek.com
+# Override if you proxy through a corporate gateway.
+# upstream_url = "https://api.deepseek.com"

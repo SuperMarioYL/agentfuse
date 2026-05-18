@@ -10,7 +10,13 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/SuperMarioYL/agentfuse?color=blue" /></a>
   <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.24-00ADD8?logo=go&logoColor=white" /></a>
   <a href="https://github.com/SuperMarioYL/agentfuse/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/SuperMarioYL/agentfuse?include_prereleases&sort=semver&color=7C2D12&label=release" /></a>
+  <a href="CHANGELOG.md"><img alt="Version" src="https://img.shields.io/badge/version-v0.2.0-F59E0B" /></a>
   <a href="https://github.com/SuperMarioYL/agentfuse/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SuperMarioYL/agentfuse/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="#v020--multi-provider"><img alt="Providers" src="https://img.shields.io/badge/providers-Anthropic%20%7C%20OpenAI%20%7C%20Gemini%20%7C%20DeepSeek%20%7C%20OpenAI--compat-7C2D12" /></a>
+</p>
+
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&size=18&pause=1500&color=F59E0B&center=true&width=620&lines=Anthropic+%7C+OpenAI+%7C+Gemini+%7C+DeepSeek+%7C+OpenAI-compat;One+binary.+One+cap.+Five+wire+formats.;Local+tokenizer+fallback.+Zero+telemetry." alt="provider rotation" />
 </p>
 
 <p align="center"><em>A single Go binary that hard-caps what your <code>claude</code>, <code>codex</code>, or any coding-agent CLI is allowed to spend — per project, locally, with no daemon and no telemetry.</em></p>
@@ -22,6 +28,7 @@
 - [Why this exists](#why-this-exists)
 - [Install &amp; quickstart](#install--quickstart)
 - [Demo](#demo)
+- [v0.2.0 — multi-provider](#v020--multi-provider)
 - [Configuration](#configuration)
 - [Commands](#commands)
 - [How it works](#how-it-works)
@@ -82,15 +89,62 @@ remaining:  $0.0000   ✗ over cap — next request will be denied
 
 > 📼 Demo coming soon — recorded asciinema cast lives at [`assets/README.md`](./assets/README.md). The 30-second cut shows `fuse init` → `fuse run claude` → a runaway loop → cap fires → HTTP 402 → `fuse cap +5` → resume.
 
+## v0.2.0 — multi-provider
+
+<img align="right" width="48" src="https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/world.svg" alt="" />
+
+v0.1 shipped Anthropic + OpenAI. v0.2 broadens the same kill-switch — same binary, same `fuse run`, same `.fuse.toml` schema — to **five provider families**, and closes the "stream omits `usage`" hole by re-tokenizing locally with [tiktoken-go](https://github.com/pkoukk/tiktoken-go).
+
+| Provider          | `provider = "..."` in `.fuse.toml` | Wire format                          | Usage source                                     |
+| ----------------- | ---------------------------------- | ------------------------------------ | ------------------------------------------------ |
+| Anthropic         | `"anthropic"` (default)            | Messages API + native SSE `usage`    | Upstream `usage` block                           |
+| OpenAI            | `"openai"`                         | Chat Completions + `include_usage`   | Upstream `usage` block                           |
+| Google Gemini     | `"gemini"`                         | `:generateContent` / `:stream…`      | `usageMetadata` → tiktoken fallback              |
+| DeepSeek          | `"deepseek"`                       | OpenAI-compat shape                  | Final SSE `usage` (always, even w/o opt-in)      |
+| OpenAI-compat     | `"openai_compat"` + `upstream_url` | Chat Completions on any host         | Upstream `usage` if present, else **tiktoken**   |
+
+Example: route a project through Groq's Llama-3.1 with a $5 cap.
+
+```toml
+# .fuse.toml
+cap_usd      = 5.0
+provider     = "openai_compat"
+upstream_url = "https://api.groq.com/openai/v1"
+account      = "personal"
+```
+
+```bash
+fuse run aider --model llama-3.1-70b
+# fuse: proxy on 127.0.0.1:51234 — provider=openai_compat upstream=api.groq.com cap=$5.00
+# … work normally … cap fires identically to v0.1
+```
+
+Three ready-to-copy configs live under [`examples/`](./examples): `.fuse.toml.gemini`, `.fuse.toml.deepseek`, `.fuse.toml.openai-compat`.
+
+### Pricing — externalized, user-overridable, never networked
+
+`assets/prices.toml` ships embedded in the binary as the bundled snapshot (2026-05). Override per-machine without rebuilding:
+
+```toml
+# ~/.fuse/prices.toml — user keys win on a per-(provider, model) basis.
+[openai_compat."llama-3.1-70b"]
+input_usd_per_1k  = 0.00079   # your negotiated rate
+output_usd_per_1k = 0.00099
+```
+
+The binary never fetches prices from the network — that is intentional and load-bearing. Stale prices are a user problem; a kill-switch that phones home is a trust problem.
+
 ## Configuration
 
 A `.fuse.toml` at your project root. AgentFuse walks up from `cwd` to find the nearest one.
 
-| Key       | Type      | Default     | Meaning                                                                 |
-| --------- | --------- | ----------- | ----------------------------------------------------------------------- |
-| `cap_usd` | `float`   | *required*  | Hard cap in USD. Pre-flight estimates count toward this — single oversized requests cannot sneak in under the line. |
-| `window`  | `string`  | `"project"` | `"project"` (cumulative since `fuse init`) or `"daily"` (rolls at midnight UTC). |
-| `account` | `string`  | `""`        | Named account from `~/.fuse/accounts.toml`. When set, AgentFuse refuses inbound keys that don't match this account's fingerprint and injects the right one, overriding stray `.env` keys. |
+| Key            | Type      | Default        | Meaning                                                                 |
+| -------------- | --------- | -------------- | ----------------------------------------------------------------------- |
+| `cap_usd`      | `float`   | *required*     | Hard cap in USD. Pre-flight estimates count toward this — single oversized requests cannot sneak in under the line. |
+| `window`       | `string`  | `"project"`    | `"project"` (cumulative since `fuse init`) or `"daily"` (rolls at midnight UTC). |
+| `account`      | `string`  | `""`           | Named account from `~/.fuse/accounts.toml`. When set, AgentFuse refuses inbound keys that don't match this account's fingerprint and injects the right one, overriding stray `.env` keys. |
+| `provider`     | `string`  | `"anthropic"`  | One of `"anthropic"`, `"openai"`, `"gemini"`, `"deepseek"`, `"openai_compat"`. New in v0.2. |
+| `upstream_url` | `string`  | provider default | Override the upstream host. **Required** for `provider = "openai_compat"`. Optional for the others (e.g. point Gemini at Vertex AI). |
 
 Accounts live separately in `~/.fuse/accounts.toml`:
 
@@ -142,10 +196,11 @@ Everything is local: single binary, no daemon, ledger at `~/.fuse/ledger.db` (bb
 ## Roadmap
 
 - [x] **m1 — intercept &amp; log.** Local proxy transparently forwards `claude`/`codex` traffic, parses the `usage` block, writes per-cwd token + USD ledger. `fuse status` shows real numbers.
-- [ ] **m2 — enforce hard-cap.** `.fuse.toml` parsing + `cap_usd` enforcement. Pre-flight estimate from `prompt_tokens` prevents single-request overshoot. HTTP 402 on deny. `fuse cap ±N` mutates atomically.
-- [ ] **m3 — run launcher.** Named accounts in `~/.fuse/accounts.toml`, fingerprint matching, OpenAI provider parity. Stray `.env` keys cannot route traffic to the wrong account.
+- [x] **m2 — enforce hard-cap.** `.fuse.toml` parsing + `cap_usd` enforcement. Pre-flight estimate prevents single-request overshoot. HTTP 402 on deny. `fuse cap ±N` mutates atomically.
+- [x] **m3 — run launcher.** Named accounts in `~/.fuse/accounts.toml`, fingerprint matching, OpenAI provider parity. Stray `.env` keys cannot route traffic to the wrong account.
+- [x] **m4 — widen the wedge (v0.2).** Gemini + DeepSeek + OpenAI-compat handlers. tiktoken-go fallback for streams without upstream `usage`. Bundled `assets/prices.toml` with user-overridable `~/.fuse/prices.toml`.
 
-Out of scope for v0.1: web UI, multi-user / SSO, cloud spend aggregation, providers beyond Anthropic + OpenAI, streaming recompute past the final SSE `usage` event, Slack / email alerts, Windows native (WSL2 only).
+Still out of scope: web UI, multi-user / SSO, cloud spend aggregation, fine-grained per-tool quotas, Slack / email alerts, Windows native (WSL2 only), and — non-negotiably — any remote price-fetch or telemetry call.
 
 ## License &amp; contributing
 

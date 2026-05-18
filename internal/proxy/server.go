@@ -49,6 +49,9 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.Handle("/anthropic/", http.StripPrefix("/anthropic", anthropicHandler(s)))
 	mux.Handle("/openai/", http.StripPrefix("/openai", openaiHandler(s)))
+	mux.Handle("/gemini/", http.StripPrefix("/gemini", geminiHandler(s)))
+	mux.Handle("/deepseek/", http.StripPrefix("/deepseek", deepseekHandler(s)))
+	mux.Handle("/openai_compat/", http.StripPrefix("/openai_compat", openaiCompatHandler(s)))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
@@ -79,6 +82,16 @@ func (s *Server) AnthropicBaseURL() string { return "http://" + s.Addr() + "/ant
 
 // OpenAIBaseURL returns the URL to set OPENAI_BASE_URL to.
 func (s *Server) OpenAIBaseURL() string { return "http://" + s.Addr() + "/openai" }
+
+// GeminiBaseURL returns the URL to set GEMINI_API_BASE / GOOGLE_API_BASE to.
+func (s *Server) GeminiBaseURL() string { return "http://" + s.Addr() + "/gemini" }
+
+// DeepSeekBaseURL returns the URL to set DEEPSEEK_API_BASE to.
+func (s *Server) DeepSeekBaseURL() string { return "http://" + s.Addr() + "/deepseek" }
+
+// OpenAICompatBaseURL returns the URL to set OPENAI_BASE_URL to when the
+// project is routed through the openai_compat handler.
+func (s *Server) OpenAICompatBaseURL() string { return "http://" + s.Addr() + "/openai_compat" }
 
 // Stop gracefully shuts down. Safe to call after Start failed.
 func (s *Server) Stop(ctx context.Context) error {

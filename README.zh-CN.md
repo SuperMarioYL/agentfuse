@@ -10,7 +10,13 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/SuperMarioYL/agentfuse?color=blue" /></a>
   <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.24-00ADD8?logo=go&logoColor=white" /></a>
   <a href="https://github.com/SuperMarioYL/agentfuse/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/SuperMarioYL/agentfuse?include_prereleases&sort=semver&color=7C2D12&label=release" /></a>
+  <a href="CHANGELOG.md"><img alt="Version" src="https://img.shields.io/badge/version-v0.2.0-F59E0B" /></a>
   <a href="https://github.com/SuperMarioYL/agentfuse/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SuperMarioYL/agentfuse/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="#v020--多供应商"><img alt="Providers" src="https://img.shields.io/badge/providers-Anthropic%20%7C%20OpenAI%20%7C%20Gemini%20%7C%20DeepSeek%20%7C%20OpenAI--compat-7C2D12" /></a>
+</p>
+
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&size=18&pause=1500&color=F59E0B&center=true&width=620&lines=Anthropic+%7C+OpenAI+%7C+Gemini+%7C+DeepSeek+%7C+OpenAI-compat;%E4%B8%80%E4%B8%AA%E4%BA%8C%E8%BF%9B%E5%88%B6+%C2%B7+%E4%B8%80%E6%9D%A1%E4%B8%8A%E9%99%90+%C2%B7+%E4%BA%94%E7%A7%8D+wire+format;%E6%9C%AC%E5%9C%B0+tokenizer+%E5%85%9C%E5%BA%95+%C2%B7+%E9%9B%B6%E9%81%A5%E6%B5%8B" alt="provider rotation" />
 </p>
 
 <p align="center"><em>一个 Go 单二进制：在你的 <code>claude</code>、<code>codex</code> 或任何编码智能体 CLI 和上游 API 之间，按项目目录硬性限额，本地运行、无后台守护、无任何遥测。</em></p>
@@ -22,6 +28,7 @@
 - [为什么需要它](#为什么需要它)
 - [安装 &amp; 上手](#安装--上手)
 - [演示](#演示)
+- [v0.2.0 — 多供应商](#v020--多供应商)
 - [配置](#配置)
 - [命令](#命令)
 - [工作原理](#工作原理)
@@ -82,15 +89,62 @@ remaining:  $0.0000   ✗ over cap — next request will be denied
 
 > 📼 演示马上补。asciinema 录像位置见 [`assets/README.md`](./assets/README.md)。30 秒剪辑覆盖：`fuse init` → `fuse run claude` → 跑飞的循环 → 触顶 → HTTP 402 → `fuse cap +5` → 继续。
 
+## v0.2.0 — 多供应商
+
+<img align="right" width="48" src="https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/world.svg" alt="" />
+
+v0.1 只支持 Anthropic + OpenAI。v0.2 把同一把熔断器扩展到 **5 个 provider 家族**——同一个二进制、同一个 `fuse run`、同一份 `.fuse.toml`——并通过 [tiktoken-go](https://github.com/pkoukk/tiktoken-go) 在本地重新分词，把 v0.1 那个"流式响应不带 `usage`"的漏洞堵上。
+
+| Provider          | `.fuse.toml` 里的 `provider`        | Wire 格式                            | usage 来源                                       |
+| ----------------- | ----------------------------------- | ------------------------------------ | ------------------------------------------------ |
+| Anthropic         | `"anthropic"`（默认值）             | Messages API + SSE `usage` 事件      | 上游 `usage` 区块                                |
+| OpenAI            | `"openai"`                          | Chat Completions + `include_usage`   | 上游 `usage` 区块                                |
+| Google Gemini     | `"gemini"`                          | `:generateContent` / `:stream…`      | `usageMetadata` → tiktoken 兜底                  |
+| DeepSeek          | `"deepseek"`                        | OpenAI-compat 形态                   | 最终 SSE `usage`（即使没开 include_usage 也有） |
+| OpenAI-compat     | `"openai_compat"` + `upstream_url`  | 任何 OpenAI 形态上游                  | 有就用上游 `usage`，没有就 **tiktoken 兜底**      |
+
+例：把项目挂到 Groq 的 Llama-3.1，$5 上限。
+
+```toml
+# .fuse.toml
+cap_usd      = 5.0
+provider     = "openai_compat"
+upstream_url = "https://api.groq.com/openai/v1"
+account      = "personal"
+```
+
+```bash
+fuse run aider --model llama-3.1-70b
+# fuse: proxy on 127.0.0.1:51234 — provider=openai_compat upstream=api.groq.com cap=$5.00
+# … 正常用 … 触顶时的行为和 v0.1 一模一样
+```
+
+三份开箱即用的示例配置放在 [`examples/`](./examples)：`.fuse.toml.gemini`、`.fuse.toml.deepseek`、`.fuse.toml.openai-compat`。
+
+### 价格表 —— 外置、用户可覆盖、永远不联网
+
+`assets/prices.toml` 在编译期通过 `//go:embed` 打进二进制（2026-05 快照）。如果你想覆盖某个 `(provider, model)` 的价格，不用重新编译，直接写一份 `~/.fuse/prices.toml`：
+
+```toml
+# ~/.fuse/prices.toml —— 按 (provider, model) 维度覆盖，用户键永远赢。
+[openai_compat."llama-3.1-70b"]
+input_usd_per_1k  = 0.00079   # 你协商到的价
+output_usd_per_1k = 0.00099
+```
+
+二进制永远不从网络拉价格——这是刻意为之、不可妥协的设计。价格过期是用户的问题；一个会偷偷联网的熔断器是信任的问题。
+
 ## 配置
 
 项目根目录放一份 `.fuse.toml`。AgentFuse 会从 `cwd` 一级一级往上找最近的那一份。
 
-| 键        | 类型      | 默认值      | 含义                                                                     |
-| --------- | --------- | ----------- | ------------------------------------------------------------------------ |
-| `cap_usd` | `float`   | *必填*      | USD 硬上限。请求前的预估也会计入这条线，单次特别大的请求绝不会"漏"过去。 |
-| `window`  | `string`  | `"project"` | `"project"`（从 `fuse init` 起累计）或 `"daily"`（UTC 零点滚动）。       |
-| `account` | `string`  | `""`        | `~/.fuse/accounts.toml` 中的命名账号。设置后，AgentFuse 会拒绝指纹对不上的 inbound key，并把正确的那把 key 注入子进程，把误读到的 `.env` key 直接盖掉。 |
+| 键             | 类型      | 默认值         | 含义                                                                     |
+| -------------- | --------- | -------------- | ------------------------------------------------------------------------ |
+| `cap_usd`      | `float`   | *必填*         | USD 硬上限。请求前的预估也会计入这条线，单次特别大的请求绝不会"漏"过去。 |
+| `window`       | `string`  | `"project"`    | `"project"`（从 `fuse init` 起累计）或 `"daily"`（UTC 零点滚动）。       |
+| `account`      | `string`  | `""`           | `~/.fuse/accounts.toml` 中的命名账号。设置后，AgentFuse 会拒绝指纹对不上的 inbound key，并把正确的那把 key 注入子进程，把误读到的 `.env` key 直接盖掉。 |
+| `provider`     | `string`  | `"anthropic"`  | 取值之一：`"anthropic"` / `"openai"` / `"gemini"` / `"deepseek"` / `"openai_compat"`。v0.2 新增。 |
+| `upstream_url` | `string`  | 对应 provider 默认 | 覆盖上游主机。`provider = "openai_compat"` **必填**；其它 provider 可选（例如把 Gemini 指到 Vertex AI）。 |
 
 账号本身放在 `~/.fuse/accounts.toml`：
 
@@ -142,10 +196,11 @@ api_key  = "sk-ant-..."
 ## 路线图
 
 - [x] **m1 — 拦截 &amp; 记账。** 本地代理透明转发 `claude` / `codex` 流量，解析 `usage`，按 cwd 写 token + USD ledger。`fuse status` 给出真实数字。
-- [ ] **m2 — 硬上限。** `.fuse.toml` 解析 + `cap_usd` 强制执行。基于 `prompt_tokens` 做请求前预估，杜绝单次"漏掉"。触顶返回 HTTP 402。`fuse cap ±N` 原子修改。
-- [ ] **m3 — 启动器模式。** `~/.fuse/accounts.toml` 命名账号、指纹匹配、OpenAI provider 对齐。误读到的 `.env` key 再也不会把流量带到错的账号上。
+- [x] **m2 — 硬上限。** `.fuse.toml` 解析 + `cap_usd` 强制执行。请求前预估杜绝单次"漏掉"。触顶返回 HTTP 402。`fuse cap ±N` 原子修改。
+- [x] **m3 — 启动器模式。** `~/.fuse/accounts.toml` 命名账号、指纹匹配、OpenAI provider 对齐。误读到的 `.env` key 再也不会把流量带到错的账号上。
+- [x] **m4 — 扩宽楔形（v0.2）。** 新增 Gemini、DeepSeek、OpenAI-compat 三个 handler；用 tiktoken-go 给"流式无 usage"的上游兜底；价格表外置 `assets/prices.toml`，可通过 `~/.fuse/prices.toml` 覆盖。
 
-v0.1 明确不做：Web UI、多人 / SSO、跨主机花费聚合、Anthropic + OpenAI 之外的 provider、SSE 最终 `usage` 之外的流式重算、Slack / 邮件告警、Windows 原生支持（仅 WSL2）。
+依然不做：Web UI、多人 / SSO、跨主机花费聚合、细粒度 per-tool 限额、Slack / 邮件告警、Windows 原生（仅 WSL2），以及——绝不做的——任何远端价格拉取或遥测调用。
 
 ## License &amp; 参与贡献
 

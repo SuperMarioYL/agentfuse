@@ -3,6 +3,9 @@ package budget
 import (
 	"fmt"
 	"strings"
+	"sync"
+
+	"github.com/SuperMarioYL/agentfuse/internal/prices"
 )
 
 // Decision is the result of asking the enforcer whether a request may proceed.
@@ -82,10 +85,81 @@ func EstimateRequest(model string, promptTokens int, maxOutputTokens int) float6
 }
 
 // CostFromUsage uses the post-response usage block to compute exact dollars.
+//
+// v0.2.0 NOTE: this entry point is kept for backwards compatibility with the
+// v0.1 Anthropic + OpenAI handlers, which still call it with provider implicit
+// in the model name. New v0.2 handlers (gemini, deepseek, openai_compat)
+// should call CostFromUsageWithProvider so the externalized prices.Table is
+// consulted instead of the static map above.
 func CostFromUsage(model string, inputTokens, outputTokens int) float64 {
 	p := PriceFor(model)
 	return float64(inputTokens)*p.InputPer1M/1_000_000 +
 		float64(outputTokens)*p.OutputPer1M/1_000_000
+}
+
+// ---------------- v0.2.0: externalized price table ----------------
+
+var (
+	priceTableMu   sync.RWMutex
+	priceTable     *prices.Table
+	priceTableErr  error
+	priceTableOnce sync.Once
+)
+
+// PriceTable returns the lazily-loaded merged price table (bundled + user
+// ~/.fuse/prices.toml override). The same Table is reused for the lifetime of
+// the process — no auto-refresh, no network. Errors are sticky.
+func PriceTable() (*prices.Table, error) {
+	priceTableOnce.Do(func() {
+		t, err := prices.LoadDefault()
+		priceTableMu.Lock()
+		priceTable = t
+		priceTableErr = err
+		priceTableMu.Unlock()
+	})
+	priceTableMu.RLock()
+	defer priceTableMu.RUnlock()
+	return priceTable, priceTableErr
+}
+
+// SetPriceTable lets tests inject a pre-built table.
+func SetPriceTable(t *prices.Table) {
+	priceTableMu.Lock()
+	defer priceTableMu.Unlock()
+	priceTable = t
+	priceTableErr = nil
+	// Mark sync.Once as done so subsequent PriceTable() calls return our value.
+	priceTableOnce.Do(func() {})
+}
+
+// CostFromUsageWithProvider computes USD using the externalized price table
+// (bundled + user override). Falls back gracefully to the v0.1 static prices
+// when the table can't be loaded — the kill-switch must never panic during
+// cost compute.
+func CostFromUsageWithProvider(provider, model string, inputTokens, outputTokens int) float64 {
+	t, err := PriceTable()
+	if err != nil || t == nil {
+		return CostFromUsage(model, inputTokens, outputTokens)
+	}
+	return t.Cost(provider, model, inputTokens, outputTokens)
+}
+
+// EstimateRequestWithProvider mirrors EstimateRequest but consults the
+// externalized table.
+func EstimateRequestWithProvider(provider, model string, promptTokens, maxOutputTokens int) float64 {
+	if promptTokens <= 0 {
+		promptTokens = 1000
+	}
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = promptTokens
+	}
+	t, err := PriceTable()
+	if err != nil || t == nil {
+		return EstimateRequest(model, promptTokens, maxOutputTokens)
+	}
+	e, _ := t.Lookup(provider, model)
+	return float64(promptTokens)*e.InputUSDPer1K/1000.0 +
+		float64(maxOutputTokens)*e.OutputUSDPer1K/1000.0
 }
 
 // Decide compares current spend + estimate against cap.

@@ -11,10 +11,16 @@ import (
 )
 
 // Config is the on-disk shape of .fuse.toml.
+//
+// v0.2.0 adds Provider + UpstreamURL so a project can route through any of the
+// five supported provider families. Provider defaults to "anthropic" for
+// backwards compat with v0.1.0 configs that omit it.
 type Config struct {
-	CapUSD  float64 `toml:"cap_usd"`
-	Window  string  `toml:"window"`
-	Account string  `toml:"account"`
+	CapUSD      float64 `toml:"cap_usd"`
+	Window      string  `toml:"window"`
+	Account     string  `toml:"account"`
+	Provider    string  `toml:"provider"`
+	UpstreamURL string  `toml:"upstream_url"`
 }
 
 const FileName = ".fuse.toml"
@@ -48,6 +54,9 @@ func Load(projectRoot string) (*Config, error) {
 	}
 	if cfg.Window == "" {
 		cfg.Window = "project"
+	}
+	if cfg.Provider == "" {
+		cfg.Provider = "anthropic"
 	}
 	if cfg.CapUSD <= 0 {
 		return nil, fmt.Errorf("cap_usd must be > 0 (got %.2f)", cfg.CapUSD)

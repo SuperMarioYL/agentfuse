@@ -72,11 +72,29 @@ func runWrapped(cmd *cobra.Command, args []string) error {
 		"agentfuse: proxy on %s — project=%s cap=$%.2f account=%q\n",
 		srv.Addr(), projectRoot, cfg.CapUSD, cfg.Account)
 
-	// Build child env.
+	// Build child env. We always set the v0.1 anthropic+openai env vars so an
+	// agent that hard-codes one of them keeps working, then we layer the
+	// provider-specific overrides on top based on the active .fuse.toml.
 	env := os.Environ()
 	env = setEnv(env, "ANTHROPIC_BASE_URL", srv.AnthropicBaseURL())
 	env = setEnv(env, "OPENAI_BASE_URL", srv.OpenAIBaseURL())
 	env = setEnv(env, "OPENAI_API_BASE", srv.OpenAIBaseURL())
+
+	switch cfg.Provider {
+	case "gemini":
+		env = setEnv(env, "GEMINI_API_BASE", srv.GeminiBaseURL())
+		env = setEnv(env, "GOOGLE_API_BASE", srv.GeminiBaseURL())
+	case "deepseek":
+		env = setEnv(env, "DEEPSEEK_API_BASE", srv.DeepSeekBaseURL())
+		// Many DeepSeek clients reuse the OpenAI_BASE_URL knob — point it at
+		// the DeepSeek-specific handler so we don't accidentally route
+		// DeepSeek traffic into the OpenAI handler.
+		env = setEnv(env, "OPENAI_BASE_URL", srv.DeepSeekBaseURL())
+		env = setEnv(env, "OPENAI_API_BASE", srv.DeepSeekBaseURL())
+	case "openai_compat":
+		env = setEnv(env, "OPENAI_BASE_URL", srv.OpenAICompatBaseURL())
+		env = setEnv(env, "OPENAI_API_BASE", srv.OpenAICompatBaseURL())
+	}
 
 	// If the named account is known, inject its key — overriding any stray
 	// .env-sourced key. The proxy will still re-check.

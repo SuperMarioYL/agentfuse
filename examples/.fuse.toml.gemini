@@ -1,0 +1,13 @@
+# .fuse.toml — Gemini routing example.
+# Drop at your project root, then `fuse run aider --model gemini-1.5-pro`
+# (or whichever Gemini-aware client you use).
+
+cap_usd  = 5.0
+window   = "project"
+account  = "personal"
+provider = "gemini"
+
+# upstream_url is optional for Gemini. Default:
+#   https://generativelanguage.googleapis.com
+# Override only if you point at Vertex AI or a regional endpoint, e.g.
+# upstream_url = "https://us-central1-aiplatform.googleapis.com"

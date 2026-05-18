@@ -1,0 +1,17 @@
+# .fuse.toml — generic OpenAI-compatible upstream (Groq, Mistral, xAI,
+# Together, OpenRouter, etc).
+#
+# `upstream_url` is REQUIRED for provider = "openai_compat" — pick the host
+# you actually want to talk to.
+
+cap_usd      = 5.0
+window       = "project"
+account      = "personal"
+provider     = "openai_compat"
+upstream_url = "https://api.groq.com/openai/v1"
+
+# Other working examples:
+# upstream_url = "https://api.mistral.ai/v1"
+# upstream_url = "https://api.x.ai/v1"
+# upstream_url = "https://api.together.xyz/v1"
+# upstream_url = "https://openrouter.ai/api/v1"
