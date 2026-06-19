@@ -21,3 +21,13 @@ coverage.txt
 
 # Build pipeline artifacts (internal, never published)
 .build_metadata*.yaml
+
+# build scratch (internal tooling — never commit)
+.spawn.*
+.builder_*
+.build_metadata*
+.stage_*
+PUBLISH_BLOCKED.md
+BUILD_SETUP_NEXT_STEPS.md
+DRIFT_REPORT.md
+GIT_AUTHOR_DRIFT.md
