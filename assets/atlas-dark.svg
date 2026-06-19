@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" width="880" height="360"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+     role="img" aria-label="AgentFuse architecture: a coding-agent CLI child is pointed at the local AgentFuse proxy, which runs account guard, pre-flight estimate and ledger-vs-cap check; ALLOW forwards to the configured provider and DENY returns HTTP 402; every reply's usage is written to the local bbolt ledger">
+  <defs>
+    <marker id="ah-d" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5A5A66"/></marker>
+  </defs>
+  <rect x="0" y="0" width="880" height="360" fill="#1D1D1F"/>
+
+  <!-- local-only frame -->
+  <rect x="24" y="28" width="600" height="308" rx="18" fill="none" stroke="#F59E0B" stroke-opacity="0.5" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="44" y="50" font-size="13" font-weight="600" fill="#FBBF6B">localhost — no daemon, no telemetry</text>
+
+  <!-- connectors -->
+  <g stroke="#3A3A44" stroke-width="1.6" fill="none">
+    <line x1="232" y1="150" x2="300" y2="150" marker-end="url(#ah-d)"/>
+    <line x1="624" y1="150" x2="700" y2="150" marker-end="url(#ah-d)"/>
+  </g>
+  <!-- DENY return path -->
+  <g stroke="#F87171" stroke-width="1.6" fill="none" stroke-dasharray="5 4">
+    <path d="M300 256 L266 256 L266 188" marker-end="url(#ah-d)"/>
+  </g>
+  <!-- ledger write path -->
+  <g stroke="#3A3A44" stroke-width="1.6" fill="none">
+    <line x1="462" y1="300" x2="462" y2="332" marker-end="url(#ah-d)"/>
+  </g>
+
+  <!-- Agent CLI child -->
+  <g>
+    <rect x="44" y="92" width="188" height="116" rx="15" fill="#94A3B8" fill-opacity="0.10" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="138" y="120" text-anchor="middle" font-size="15" font-weight="600" fill="#CBD5E1">Coding-agent CLI</text>
+    <text x="138" y="142" text-anchor="middle" font-size="11.5" fill="#94A3B8">claude · codex · aider</text>
+    <rect x="62" y="156" width="152" height="38" rx="9" fill="#94A3B8" fill-opacity="0.12" stroke="#94A3B8" stroke-width="1.1"/>
+    <text x="138" y="174" text-anchor="middle" font-size="10.5" fill="#CBD5E1">ANTHROPIC_BASE_URL</text>
+    <text x="138" y="188" text-anchor="middle" font-size="10.5" font-weight="600" fill="#CBD5E1">→ 127.0.0.1:rand</text>
+  </g>
+
+  <!-- AgentFuse proxy -->
+  <g>
+    <rect x="300" y="92" width="324" height="208" rx="15" fill="#F59E0B" fill-opacity="0.14" stroke="#F59E0B" stroke-width="1.6"/>
+    <text x="462" y="118" text-anchor="middle" font-size="16" font-weight="700" fill="#FBBF6B">AgentFuse proxy — fail-closed</text>
+    <g font-size="12.5">
+      <rect x="320" y="132" width="284" height="34" rx="9" fill="#000000" fill-opacity="0.25" stroke="#F59E0B" stroke-width="1.1"/>
+      <text x="334" y="154" fill="#EDE6D8"><tspan font-weight="700" fill="#FBBF6B">1</tspan>  account guard — fingerprint match</text>
+      <rect x="320" y="172" width="284" height="34" rx="9" fill="#000000" fill-opacity="0.25" stroke="#F59E0B" stroke-width="1.1"/>
+      <text x="334" y="194" fill="#EDE6D8"><tspan font-weight="700" fill="#FBBF6B">2</tspan>  pre-flight estimate (tiktoken)</text>
+      <rect x="320" y="212" width="284" height="34" rx="9" fill="#000000" fill-opacity="0.25" stroke="#F59E0B" stroke-width="1.1"/>
+      <text x="334" y="234" fill="#EDE6D8"><tspan font-weight="700" fill="#FBBF6B">3</tspan>  ledger check vs cap_usd</text>
+      <rect x="320" y="252" width="284" height="34" rx="9" fill="#F87171" fill-opacity="0.16" stroke="#F87171" stroke-width="1.1"/>
+      <text x="334" y="274" fill="#FCA5A5"><tspan font-weight="700" fill="#F87171">4</tspan>  DENY → HTTP 402  ·  ALLOW → forward</text>
+    </g>
+  </g>
+
+  <!-- Providers -->
+  <g>
+    <rect x="700" y="92" width="156" height="208" rx="15" fill="#4DA3FF" fill-opacity="0.10" stroke="#4DA3FF" stroke-width="1.5"/>
+    <text x="778" y="118" text-anchor="middle" font-size="15" font-weight="600" fill="#9CCBFF">Providers</text>
+    <g font-size="12" font-weight="600">
+      <rect x="716" y="134" width="124" height="30" rx="8" fill="#4DA3FF" fill-opacity="0.16" stroke="#4DA3FF" stroke-width="1.1"/>
+      <text x="778" y="154" text-anchor="middle" fill="#9CCBFF">Anthropic</text>
+      <rect x="716" y="170" width="124" height="30" rx="8" fill="#4DA3FF" fill-opacity="0.16" stroke="#4DA3FF" stroke-width="1.1"/>
+      <text x="778" y="190" text-anchor="middle" fill="#9CCBFF">OpenAI</text>
+      <rect x="716" y="206" width="124" height="30" rx="8" fill="#4DA3FF" fill-opacity="0.16" stroke="#4DA3FF" stroke-width="1.1"/>
+      <text x="778" y="226" text-anchor="middle" fill="#9CCBFF">Gemini</text>
+      <rect x="716" y="242" width="124" height="30" rx="8" fill="#4DA3FF" fill-opacity="0.16" stroke="#4DA3FF" stroke-width="1.1"/>
+      <text x="778" y="262" text-anchor="middle" fill="#9CCBFF">DeepSeek · compat</text>
+    </g>
+  </g>
+
+  <!-- Ledger -->
+  <g>
+    <rect x="356" y="316" width="212" height="40" rx="11" fill="#2DC79A" fill-opacity="0.12" stroke="#2DC79A" stroke-width="1.5"/>
+    <text x="462" y="333" text-anchor="middle" font-size="12.5" font-weight="600" fill="#5BE0BC">~/.fuse/ledger.db (bbolt)</text>
+    <text x="462" y="348" text-anchor="middle" font-size="10.5" fill="#2DC79A">(project, day) → tokens · usd · req</text>
+  </g>
+</svg>

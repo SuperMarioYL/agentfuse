@@ -26,6 +26,7 @@
 ## 目录
 
 - [为什么需要它](#为什么需要它)
+- [架构](#-架构)
 - [安装 &amp; 上手](#安装--上手)
 - [演示](#演示)
 - [v0.2.0 — 多供应商](#v020--多供应商)
@@ -42,6 +43,18 @@
 不到一年，编码智能体 CLI 从"每轮按一下回车"变成了通宵跑的自动循环，可计费模型并没有跟上。一份不小心留下的 `.env` 就能把 **$187** 的请求路由到错的 Anthropic 账号（[这条 476↑ 的 PSA 帖子](https://reddit.com/r/ClaudeAI/comments/1tbaq2d/) 就是这个仓库的起点）。通宵的 agentic loop 把 Max 套餐烧穿。6 月 15 日的 `--print` 计费变更，把跑了好几个月的脚本从"订阅"一夜之间挪进了"按 credit 计费"。
 
 AgentFuse 就是那条 PSA 想要的总闸：一个轻量本地代理，读取项目根目录的 `.fuse.toml`，**累计花费一旦触顶就直接 fail-closed**——下一个请求根本不会离开你的机器。无后台守护、无云端、无遥测，用 `strings` 30 秒就能审计完整二进制。
+
+## <img src="https://api.iconify.design/tabler/topology-star-3.svg?color=%23F59E0B" width="20" height="20" align="center" /> 架构
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/atlas-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/atlas-light.svg">
+    <img src="./assets/atlas-light.svg" width="880" alt="编码智能体 CLI 子进程被指向本地 AgentFuse 代理，代理依次执行账号守卫、请求前预估、对照 ledger 检查上限；ALLOW 转发到配置的 provider，DENY 返回 HTTP 402；每个响应的 usage 都写入本地 bbolt ledger">
+  </picture>
+</p>
+
+`fuse run <cmd>` 把你的智能体 CLI 作为子进程 `exec`，并把它的 base URL 改写到一个随机的 `127.0.0.1` 端口——也就是 **AgentFuse 代理**。每个请求都要过四道 fail-closed 闸：账号守卫（对照 `~/.fuse/accounts.toml` 做指纹匹配）、tiktoken 请求前预估、对照 `cap_usd` 检查 ledger，最后 **ALLOW → 转发**到配置的 provider 或 **DENY → HTTP 402**。每个响应的 `usage` 会按 `(project, day)` 写进本地 bbolt ledger。除了你指定的那次上游调用，没有任何东西离开这台机器。
 
 ## 安装 &amp; 上手
 
@@ -85,9 +98,13 @@ remaining:  $0.0000   ✗ over cap — next request will be denied
 
 </details>
 
-## 演示
+## <img src="https://api.iconify.design/tabler/photo.svg?color=%23F59E0B" width="20" height="20" align="center" /> 演示
 
-> 📼 演示马上补。asciinema 录像位置见 [`assets/README.md`](./assets/README.md)。30 秒剪辑覆盖：`fuse init` → `fuse run claude` → 跑飞的循环 → 触顶 → HTTP 402 → `fuse cap +5` → 继续。
+<p align="center">
+  <img src="./assets/demo.gif" alt="fuse init → fuse run → 触顶 → HTTP 402 → fuse cap +5 → 继续" width="820" />
+</p>
+
+<sub>↑ 终端实录，由 CI 用 <a href="https://github.com/charmbracelet/vhs">vhs</a> 渲染 <a href="./docs/demo.tape">docs/demo.tape</a>（每次打 release tag 时自动重新生成）。覆盖：`fuse init` → `fuse run` → 跑飞的循环 → 触顶返回 HTTP 402 → `fuse cap +5` → 继续。</sub>
 
 ## v0.2.0 — 多供应商
 
@@ -208,4 +225,4 @@ MIT，详见 [LICENSE](LICENSE)。Issue 和 PR 都欢迎，地址：[github.com/
 
 ---
 
-<p align="center"><sub>由 <a href="https://github.com/SuperMarioYL/ai-radar">ai-radar</a> 流水线生成 · scan-2026-05-17-2013 · 候选 <code>t7neg04</code></sub></p>
+<p align="center"><sub>MIT © 2026 SuperMarioYL</sub></p>
