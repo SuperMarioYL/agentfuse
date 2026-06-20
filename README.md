@@ -183,6 +183,7 @@ api_key  = "sk-ant-..."
 | `fuse run <cmd>` | Start the local proxy, point the child CLI at `127.0.0.1:<rand>`, exec `<cmd>`, exit when it does. |
 | `fuse cap +N` / `=N` / `-N` | Mutate the cap atomically (refuses any change that would land at ≤ 0). |
 | `fuse status`  | Print current account, cap, today's spend, project total, and remaining budget. |
+| `fuse prices`  | Read-only: print the resolved price table (bundled snapshot + `~/.fuse/prices.toml` overlay), the snapshot date, and the tiktoken-vs-usage accuracy. `--check <provider/model>` flags models that hit the conservative fallback. No network. |
 
 ## How it works
 
@@ -216,6 +217,7 @@ Everything is local: single binary, no daemon, ledger at `~/.fuse/ledger.db` (bb
 - [x] **m2 — enforce hard-cap.** `.fuse.toml` parsing + `cap_usd` enforcement. Pre-flight estimate prevents single-request overshoot. HTTP 402 on deny. `fuse cap ±N` mutates atomically.
 - [x] **m3 — run launcher.** Named accounts in `~/.fuse/accounts.toml`, fingerprint matching, OpenAI provider parity. Stray `.env` keys cannot route traffic to the wrong account.
 - [x] **m4 — widen the wedge (v0.2).** Gemini + DeepSeek + OpenAI-compat handlers. tiktoken-go fallback for streams without upstream `usage`. Bundled `assets/prices.toml` with user-overridable `~/.fuse/prices.toml`.
+- [x] **v0.3 — fail-closed correctness.** Fixed streamed Anthropic + OpenAI responses that billed **$0** (SSE bodies were never parsed, so the cap never fired); per-side tiktoken fallback for partial usage; atomic `Reserve`/`CommitDelta` so concurrent requests can't overshoot the cap; cap-critical cost now routes through the user-overridable price table. Added a tiktoken accuracy harness and a read-only `fuse prices` introspection command.
 
 Still out of scope: web UI, multi-user / SSO, cloud spend aggregation, fine-grained per-tool quotas, Slack / email alerts, Windows native (WSL2 only), and — non-negotiably — any remote price-fetch or telemetry call.
 

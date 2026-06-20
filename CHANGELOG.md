@@ -6,6 +6,65 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-20
+
+A fail-closed correctness pass. v0.2.0 widened the wedge to five provider
+families, but the streaming paths under-billed: a streamed Anthropic or OpenAI
+response was parsed with a single `json.Unmarshal` of the whole SSE body, which
+fails, so the usage/ledger block was skipped and the request billed **$0** — the
+cap never fired on streamed spend, defeating the product's core "never under-bill,
+fail-closed at the cap" guarantee. This release fixes that and four related
+cap-critical defects, then adds two diagnostics that make the two still-open §8
+kill criteria measurable.
+
+### Fixed
+
+- **Anthropic streaming under-billing** (`internal/proxy/anthropic.go`): the
+  handler now detects an SSE body and walks the `data:` event frames
+  (`message_start` for input tokens, `message_delta` for output tokens,
+  `content_block_delta` for the completion text), taking the real usage instead
+  of billing $0. When no usage block is present at all, it falls back to a local
+  tiktoken estimate before touching the ledger — matching the Gemini/DeepSeek/
+  OpenAI-compat handlers.
+- **OpenAI streaming under-billing** (`internal/proxy/openai.go`): reuses the
+  DeepSeek SSE-frame parser (identical OpenAI-compat wire shape) to read the
+  final-frame usage from streamed Chat Completions, with a tiktoken fallback when
+  usage is absent.
+- **Partial-usage fallback** (`deepseek.go`, `openai_compat.go`, `gemini.go`):
+  the tiktoken fallback now runs per-side. Previously it only fired when BOTH the
+  input and output token counts were zero, so a truncated stream that reported
+  only `prompt_tokens` billed the completion as 0 output tokens. Each side is now
+  estimated independently when missing.
+- **Check-then-spend race** (`internal/ledger/bolt.go`): added an atomic
+  `Reserve` / `CommitDelta` / `Release` discipline. Each handler now reserves its
+  estimate inside one critical section that re-reads the project total plus all
+  in-flight reservations and rejects if the cap would be exceeded; the reservation
+  is reconciled with realized usage after the response. Previously the cap check
+  and the ledger `Add` were separate locked ops, so N concurrent requests (coding
+  agents fan out many) could all read the same under-cap total and collectively
+  overshoot the cap.
+- **v0.1 static-map fallback price** (`anthropic.go`, `openai.go`): both handlers
+  now route cap-critical cost through `CostFromUsageWithProvider`, so the
+  user-overridable price table and its conservative `FallbackEntry` govern the
+  cost of unknown models, instead of the cheaper static-map fallback that could
+  under-price a genuinely expensive new model and overshoot the true cap.
+
+### Added
+
+- **Tiktoken accuracy harness** (`internal/tokens/accuracy.go`): records the
+  tiktoken estimate alongside the upstream-reported usage whenever both are
+  present on the same response, and computes the median signed/absolute
+  percentage error — making the §8 "median error > 25% → redesign the estimator"
+  kill criterion evaluable for the first time. Measurement only; the estimator
+  math is unchanged.
+- **`fuse prices` introspection subcommand** (`internal/cli/prices.go`): a
+  read-only diagnostic that prints the effective resolved price table (bundled
+  snapshot + `~/.fuse/prices.toml` overlay), the bundled snapshot date, the
+  conservative `FallbackEntry`, which `--check` models resolve to that fallback,
+  and the accuracy-harness median error. **No network** — it is not a remote
+  price-fetcher and not `fuse prices update`; those stay out of scope to preserve
+  the trust premise.
+
 ## [0.2.0] — 2026-05-18
 
 Single milestone `m4_v2_widen` from `mvp_plan_v0.2.0.md`. Adds three new

@@ -109,12 +109,18 @@ func openaiCompatHandler(s *Server) http.Handler {
 			if parsedModel != "" {
 				model = parsedModel
 			}
-			if inTok == 0 && outTok == 0 {
-				// The expected branch for generic openai_compat: upstream
-				// omitted usage. Re-tokenize locally.
-				inTok = promptTokens
-				outTok = tokens.EstimateCompletion(model, completionText)
-				fmt.Fprintf(os.Stderr, "agentfuse: openai_compat upstream omitted usage; tiktoken fallback model=%s in=%d out=%d\n",
+			// Fall back per-side so a partial final frame (only one of in/out
+			// present) does not under-bill the missing half. The expected branch
+			// for generic openai_compat is both missing; per-side also covers the
+			// truncated-stream case.
+			if inTok == 0 || outTok == 0 {
+				if inTok == 0 {
+					inTok = promptTokens
+				}
+				if outTok == 0 {
+					outTok = tokens.EstimateCompletion(model, completionText)
+				}
+				fmt.Fprintf(os.Stderr, "agentfuse: openai_compat upstream usage incomplete; tiktoken fallback model=%s in=%d out=%d\n",
 					model, inTok, outTok)
 			}
 			usd := budget.CostFromUsageWithProvider("openai_compat", model, inTok, outTok)

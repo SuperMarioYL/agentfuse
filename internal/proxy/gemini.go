@@ -143,9 +143,12 @@ func geminiHandler(s *Server) http.Handler {
 		// 5. Parse usage and update ledger (only on success).
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			inTok, outTok, completionText := parseGeminiUsage(respBody)
-			if inTok == 0 && outTok == 0 {
-				// Fallback: re-tokenize prompt + completion locally.
+			// Fall back per-side so a partial usage block (only one count present)
+			// does not under-bill the missing half.
+			if inTok == 0 {
 				inTok = promptTokens
+			}
+			if outTok == 0 {
 				outTok = tokens.EstimateCompletion(model, completionText)
 			}
 			usd := budget.CostFromUsageWithProvider("gemini", model, inTok, outTok)

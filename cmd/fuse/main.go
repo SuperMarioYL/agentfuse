@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.0"
+var version = "0.3.0"
 
 func main() {
 	root := &cobra.Command{
@@ -28,6 +28,7 @@ fails closed when a project's spend cap is reached. Configuration lives in a
 	root.AddCommand(cli.NewRunCmd())
 	root.AddCommand(cli.NewCapCmd())
 	root.AddCommand(cli.NewStatusCmd())
+	root.AddCommand(cli.NewPricesCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

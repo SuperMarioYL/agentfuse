@@ -183,6 +183,7 @@ api_key  = "sk-ant-..."
 | `fuse run <cmd>`              | 启动本地代理，把子进程 CLI 指向 `127.0.0.1:<rand>`，`exec <cmd>`，跟随子进程退出。 |
 | `fuse cap +N` / `=N` / `-N`   | 原子修改上限（任何会让上限 ≤ 0 的变更都会被拒）。                                  |
 | `fuse status`                 | 打印当前账号、上限、今日花费、项目累计花费、剩余预算。                             |
+| `fuse prices`                 | 只读：打印解析后的价格表（内置快照 + `~/.fuse/prices.toml` 覆盖）、快照日期、tiktoken 与上游 usage 的误差。`--check <provider/model>` 会标出命中兜底价的模型。不联网。 |
 
 ## 工作原理
 
@@ -216,6 +217,7 @@ api_key  = "sk-ant-..."
 - [x] **m2 — 硬上限。** `.fuse.toml` 解析 + `cap_usd` 强制执行。请求前预估杜绝单次"漏掉"。触顶返回 HTTP 402。`fuse cap ±N` 原子修改。
 - [x] **m3 — 启动器模式。** `~/.fuse/accounts.toml` 命名账号、指纹匹配、OpenAI provider 对齐。误读到的 `.env` key 再也不会把流量带到错的账号上。
 - [x] **m4 — 扩宽楔形（v0.2）。** 新增 Gemini、DeepSeek、OpenAI-compat 三个 handler；用 tiktoken-go 给"流式无 usage"的上游兜底；价格表外置 `assets/prices.toml`，可通过 `~/.fuse/prices.toml` 覆盖。
+- [x] **v0.3 — fail-closed 正确性修复。** 修掉了流式 Anthropic / OpenAI 响应被计为 **$0** 的缺陷（SSE 响应体从未被解析，上限因此永不触发）；部分 usage 时按 in/out 分别用 tiktoken 兜底；新增原子 `Reserve` / `CommitDelta`，并发请求不再越过上限；关键计费改走可被用户覆盖的价格表。新增 tiktoken 精度测量 harness 与只读的 `fuse prices` 诊断命令。
 
 依然不做：Web UI、多人 / SSO、跨主机花费聚合、细粒度 per-tool 限额、Slack / 邮件告警、Windows 原生（仅 WSL2），以及——绝不做的——任何远端价格拉取或遥测调用。
 

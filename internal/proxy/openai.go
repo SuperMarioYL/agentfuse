@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/SuperMarioYL/agentfuse/internal/budget"
+	"github.com/SuperMarioYL/agentfuse/internal/tokens"
 )
 
 // OpenAIUpstream is overridable for tests.
@@ -59,25 +60,34 @@ func openaiHandler(s *Server) http.Handler {
 		var req openaiRequest
 		_ = json.Unmarshal(body, &req)
 
+		promptText := openaiPromptText(body)
 		promptTokens := estimatePromptTokens(body)
 		maxOut := req.MaxTokens
 		if maxOut == 0 {
 			maxOut = req.MaxOutputTokens
 		}
-		estimate := budget.EstimateRequest(req.Model, promptTokens, maxOut)
+		estimate := budget.EstimateRequestWithProvider("openai", req.Model, promptTokens, maxOut)
 
-		currentEntry, err := s.led.ProjectTotal(s.projectRoot)
+		// Atomic reserve so concurrent requests cannot collectively overshoot the cap.
+		allowed, err := s.led.Reserve(s.projectRoot, s.cfg.CapUSD, estimate)
 		if err != nil {
-			writeFuseError(w, http.StatusInternalServerError, "ledger read: "+err.Error(), "")
+			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
 			return
 		}
-		decision := budget.Decide(currentEntry.USD, s.cfg.CapUSD, estimate, s.projectRoot)
-		if !decision.Allow {
+		if !allowed {
+			total, _ := s.led.ProjectTotal(s.projectRoot)
+			decision := budget.Decide(total.USD, s.cfg.CapUSD, estimate, s.projectRoot)
 			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
 				decision.Reason, decision.SuggestedCmd)
 			writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
 			return
 		}
+		committed := false
+		defer func() {
+			if !committed {
+				s.led.Release(s.projectRoot, estimate)
+			}
+		}()
 
 		upstreamURL, err := url.Parse(OpenAIUpstream + r.URL.RequestURI())
 		if err != nil {
@@ -105,26 +115,30 @@ func openaiHandler(s *Server) http.Handler {
 			return
 		}
 
+		// Chat Completions streaming returns SSE `data: {...}` frames terminated by
+		// `data: [DONE]`, not one JSON object — a single json.Unmarshal of the whole
+		// body fails and the request would bill $0, bypassing the cap. Reuse the
+		// DeepSeek parser (identical OpenAI-compat wire shape) for BOTH the unary
+		// and the streamed shapes, and fall back to a local tiktoken estimate when
+		// no usage is present.
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			var parsed openaiResponse
-			if err := json.Unmarshal(respBody, &parsed); err == nil {
-				model := parsed.Model
-				if model == "" {
-					model = req.Model
-				}
-				inTok := parsed.Usage.PromptTokens
-				if inTok == 0 {
-					inTok = parsed.Usage.InputTokens
-				}
-				outTok := parsed.Usage.CompletionTokens
-				if outTok == 0 {
-					outTok = parsed.Usage.OutputTokens
-				}
-				usd := budget.CostFromUsage(model, inTok, outTok)
-				if _, err := s.led.Add(s.projectRoot, inTok, outTok, usd); err != nil {
-					fmt.Fprintf(os.Stderr, "agentfuse: ledger update failed: %v\n", err)
-				}
+			inTok, outTok, completionText, parsedModel := parseDeepSeekUsage(respBody)
+			model := parsedModel
+			if model == "" {
+				model = req.Model
 			}
+			if inTok == 0 && outTok == 0 {
+				inTok = tokens.EstimatePrompt(model, promptText)
+				outTok = tokens.EstimateCompletion(model, completionText)
+			} else {
+				tokens.RecordSample("openai", model,
+					tokens.EstimatePrompt(model, completionText), outTok)
+			}
+			usd := budget.CostFromUsageWithProvider("openai", model, inTok, outTok)
+			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {
+				fmt.Fprintf(os.Stderr, "agentfuse: ledger update failed: %v\n", err)
+			}
+			committed = true
 		}
 
 		copyHeader(w.Header(), resp.Header)

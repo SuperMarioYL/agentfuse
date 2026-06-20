@@ -119,11 +119,15 @@ func deepseekHandler(s *Server) http.Handler {
 			if parsedModel != "" {
 				model = parsedModel
 			}
-			if inTok == 0 && outTok == 0 {
-				// DeepSeek normally emits usage even without include_usage —
-				// hitting this branch means the upstream surprised us. Use
-				// tiktoken fallback so the ledger still moves.
+			// Fall back per-side: a final frame that carries only prompt_tokens
+			// (truncated stream, or a provider that emits prompt usage early but
+			// drops completion usage) leaves one side at 0. Guarding on BOTH being
+			// zero would bill that side as 0 tokens — an under-bill. Estimate each
+			// missing side independently.
+			if inTok == 0 {
 				inTok = promptTokens
+			}
+			if outTok == 0 {
 				outTok = tokens.EstimateCompletion(model, completionText)
 			}
 			usd := budget.CostFromUsageWithProvider("deepseek", model, inTok, outTok)
