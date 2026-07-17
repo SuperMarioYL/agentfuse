@@ -63,18 +63,30 @@ func openaiCompatHandler(s *Server) http.Handler {
 		}
 		estimate := budget.EstimateRequestWithProvider("openai_compat", model, promptTokens, maxOut)
 
-		currentEntry, err := s.led.ProjectTotal(s.projectRoot)
+		// Atomic reserve so concurrent requests cannot collectively overshoot
+		// the cap. v0.4: openai_compat was previously on the racy ProjectTotal->Decide->Add
+		// path — the v0.3.0 Reserve/CommitDelta fix only landed in anthropic+openai,
+		// so 3/5 providers (deepseek/gemini/openai_compat) could still overshoot under
+		// concurrency. Now matches the atomic discipline of the other handlers.
+		allowed, err := s.led.Reserve(s.projectRoot, s.cfg.CapUSD, estimate)
 		if err != nil {
-			writeFuseError(w, http.StatusInternalServerError, "ledger read: "+err.Error(), "")
+			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
 			return
 		}
-		decision := budget.Decide(currentEntry.USD, s.cfg.CapUSD, estimate, s.projectRoot)
-		if !decision.Allow {
+		if !allowed {
+			total, _ := s.led.ProjectTotal(s.projectRoot)
+			decision := budget.Decide(total.USD, s.cfg.CapUSD, estimate, s.projectRoot)
 			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
 				decision.Reason, decision.SuggestedCmd)
 			writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
 			return
 		}
+		committed := false
+		defer func() {
+			if !committed {
+				s.led.Release(s.projectRoot, estimate)
+			}
+		}()
 
 		upstreamBase := strings.TrimRight(s.cfg.UpstreamURL, "/")
 		upstreamURL, err := url.Parse(upstreamBase + r.URL.RequestURI())
@@ -124,9 +136,10 @@ func openaiCompatHandler(s *Server) http.Handler {
 					model, inTok, outTok)
 			}
 			usd := budget.CostFromUsageWithProvider("openai_compat", model, inTok, outTok)
-			if _, err := s.led.Add(s.projectRoot, inTok, outTok, usd); err != nil {
+			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {
 				fmt.Fprintf(os.Stderr, "agentfuse: ledger update failed: %v\n", err)
 			}
+			committed = true
 		}
 
 		copyHeader(w.Header(), resp.Header)

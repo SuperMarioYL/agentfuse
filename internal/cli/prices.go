@@ -21,6 +21,7 @@ import (
 // upstream you point it at" trust premise. This command performs zero network.
 func NewPricesCmd() *cobra.Command {
 	var lookups []string
+	var diff bool
 	cmd := &cobra.Command{
 		Use:   "prices",
 		Short: "Show the effective price table, snapshot date, and estimator accuracy (read-only)",
@@ -31,17 +32,23 @@ It also reports the bundled snapshot date, flags any --check models that resolve
 to the conservative FallbackEntry (no explicit price found), and surfaces the
 median tiktoken-vs-upstream error from the accuracy harness.
 
+--diff surfaces price-table drift: which bundled entries your overlay shadows
+(a stale override whose bundled price has since moved) and which of your entries
+have no bundled counterpart (an orphaned/stale model the bundle retired).
+
 This command makes NO network calls. To change prices, edit ~/.fuse/prices.toml.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runPrices(cmd, lookups)
+			return runPrices(cmd, lookups, diff)
 		},
 	}
 	cmd.Flags().StringSliceVar(&lookups, "check", nil,
 		"model(s) to resolve and flag if they hit FallbackEntry (e.g. --check anthropic/claude-opus-5)")
+	cmd.Flags().BoolVar(&diff, "diff", false,
+		"show price-table drift: bundled entries your overlay shadows + your orphaned entries")
 	return cmd
 }
 
-func runPrices(cmd *cobra.Command, lookups []string) error {
+func runPrices(cmd *cobra.Command, lookups []string, diff bool) error {
 	out := cmd.OutOrStdout()
 
 	userPath, _ := prices.DefaultUserPath()
@@ -86,6 +93,32 @@ func runPrices(cmd *cobra.Command, lookups []string) error {
 			}
 			fmt.Fprintf(out, "  %-40s in=%.4f out=%.4f  %s\n",
 				provider+"/"+model, e.InputUSDPer1K, e.OutputUSDPer1K, status)
+		}
+	}
+
+	// --diff: price-table drift — bundled entries the user overlay shadows
+	// (stale override) + user entries with no bundled counterpart (orphaned).
+	// Directly answers the §8 "v0.4 must answer pricing UX directly" deferral:
+	// makes the root cause of "wrong cost" bugs visible. Read-only, zero network.
+	if diff {
+		bundled, berr := prices.LoadBundled()
+		if berr != nil {
+			return fmt.Errorf("load bundled prices: %w", berr)
+		}
+		report := table.Diff(bundled)
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "price-table drift:")
+		fmt.Fprintf(out, "  shadowed (your override beats a bundled default): %d\n", len(report.Shadowed))
+		for _, s := range report.Shadowed {
+			fmt.Fprintf(out, "    %-40s bundled=$%.4f/$%.4f  ->  merged=$%.4f/$%.4f per 1k\n",
+				s.Key,
+				s.BundledPrice.InputUSDPer1K, s.BundledPrice.OutputUSDPer1K,
+				s.MergedPrice.InputUSDPer1K, s.MergedPrice.OutputUSDPer1K)
+		}
+		fmt.Fprintf(out, "  orphaned (your entry has no bundled counterpart — possibly stale model): %d\n", len(report.Orphaned))
+		for _, o := range report.Orphaned {
+			fmt.Fprintf(out, "    %-40s merged=$%.4f/$%.4f per 1k\n",
+				o.Key, o.Price.InputUSDPer1K, o.Price.OutputUSDPer1K)
 		}
 	}
 

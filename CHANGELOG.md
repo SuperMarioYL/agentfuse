@@ -6,6 +6,45 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-17
+
+A correctness-completion release. v0.3.0 shipped the atomic `Reserve`/`CommitDelta`
+ledger guard and the tiktoken accuracy harness, but the guard only landed in two
+of the five provider handlers and the harness recorded the wrong estimator side.
+v0.4.0 finishes the thesis and adds one read-only pricing-drift surface.
+
+### Fixed
+- **Cap race still open on 3/5 providers.** The v0.3.0 `fix-ledger-check-add-race`
+  milestone introduced `Ledger.Reserve`/`CommitDelta` so the check→forward→add
+  sequence is atomic and concurrent requests cannot collectively overshoot the cap,
+  but only `anthropic.go` and `openai.go` were converted. `deepseek.go`,
+  `gemini.go`, and `openai_compat.go` still used the racy `ProjectTotal → Decide
+  → Add` path — so on DeepSeek, Gemini, and any OpenAI-compatible host (Groq,
+  Mistral, xAI, Together, OpenRouter) concurrent requests could all pass the cap
+  check before any `Add` landed and overshoot by up to (N-1) per-request costs.
+  All three handlers now use the same `Reserve → forward → CommitDelta` (+deferred
+  `Release`) discipline as the other two.
+- **Accuracy harness recorded the wrong estimator side.** `anthropic.go` and
+  `openai.go` called `tokens.RecordSample(provider, model,
+  tokens.EstimatePrompt(model, completionText), outTok)` — feeding the completion
+  text to the *prompt* estimator (which has no +100 round-up) and comparing against
+  the upstream *output* token count. The harness is documented as measuring the
+  tiktoken estimate for a completion vs the upstream-reported count; the estimator
+  the ledger fallback actually bills with is `EstimateCompletion` (rounds UP to the
+  nearest 100 tokens). The old call measured a different, structurally-biased-low
+  estimator than the cap uses, so the §8 ">25% median error ⇒ redesign" kill
+  criterion the harness was built to make evaluable was still not honestly
+  measurable. Both handlers now call `EstimateCompletion(model, completionText)`.
+
+### Added
+- **`fuse prices --diff`** — read-only price-table drift visibility. Compares the
+  merged table (bundled + `~/.fuse/prices.toml` overlay) against the bundled-only
+  snapshot and prints **shadowed** entries (your override beats a bundled default —
+  flags stale overrides whose bundled price has since moved) and **orphaned**
+  entries (your entry has no bundled counterpart — the bundle retired that model).
+  Surfaces the two root causes of "wrong cost" bugs the §8 kill criterion deferred
+  to v0.4. Zero network; the trust premise is unchanged.
+
 ## [0.3.0] — 2026-06-20
 
 A fail-closed correctness pass. v0.2.0 widened the wedge to five provider

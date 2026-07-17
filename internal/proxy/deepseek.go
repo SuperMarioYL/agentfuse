@@ -71,18 +71,30 @@ func deepseekHandler(s *Server) http.Handler {
 		}
 		estimate := budget.EstimateRequestWithProvider("deepseek", model, promptTokens, maxOut)
 
-		currentEntry, err := s.led.ProjectTotal(s.projectRoot)
+		// Atomic reserve so concurrent requests cannot collectively overshoot
+		// the cap. v0.4: deepseek was previously on the racy ProjectTotal->Decide->Add
+		// path — the v0.3.0 Reserve/CommitDelta fix only landed in anthropic+openai,
+		// so 3/5 providers (deepseek/gemini/openai_compat) could still overshoot under
+		// concurrency. Now matches the atomic discipline of the other handlers.
+		allowed, err := s.led.Reserve(s.projectRoot, s.cfg.CapUSD, estimate)
 		if err != nil {
-			writeFuseError(w, http.StatusInternalServerError, "ledger read: "+err.Error(), "")
+			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
 			return
 		}
-		decision := budget.Decide(currentEntry.USD, s.cfg.CapUSD, estimate, s.projectRoot)
-		if !decision.Allow {
+		if !allowed {
+			total, _ := s.led.ProjectTotal(s.projectRoot)
+			decision := budget.Decide(total.USD, s.cfg.CapUSD, estimate, s.projectRoot)
 			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
 				decision.Reason, decision.SuggestedCmd)
 			writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
 			return
 		}
+		committed := false
+		defer func() {
+			if !committed {
+				s.led.Release(s.projectRoot, estimate)
+			}
+		}()
 
 		upstreamBase := DeepSeekUpstream
 		if s.cfg.UpstreamURL != "" {
@@ -131,9 +143,10 @@ func deepseekHandler(s *Server) http.Handler {
 				outTok = tokens.EstimateCompletion(model, completionText)
 			}
 			usd := budget.CostFromUsageWithProvider("deepseek", model, inTok, outTok)
-			if _, err := s.led.Add(s.projectRoot, inTok, outTok, usd); err != nil {
+			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {
 				fmt.Fprintf(os.Stderr, "agentfuse: ledger update failed: %v\n", err)
 			}
+			committed = true
 		}
 
 		copyHeader(w.Header(), resp.Header)

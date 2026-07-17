@@ -143,8 +143,12 @@ func anthropicHandler(s *Server) http.Handler {
 			} else {
 				// Both upstream usage AND a local estimate are available — record
 				// the comparison so the §8 >25% accuracy criterion is measurable.
+				// v0.4: use EstimateCompletion (the estimator the fallback actually
+				// bills with, incl. the +100 round-up) on the completion text — the
+				// harness must measure the estimator the cap uses, not EstimatePrompt
+				// run on completion text (wrong side + no round-up = biased-low).
 				tokens.RecordSample("anthropic", model,
-					tokens.EstimatePrompt(model, completionText), outTok)
+					tokens.EstimateCompletion(model, completionText), outTok)
 			}
 			usd := budget.CostFromUsageWithProvider("anthropic", model, inTok, outTok)
 			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {

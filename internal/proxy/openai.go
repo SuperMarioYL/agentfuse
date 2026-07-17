@@ -131,8 +131,12 @@ func openaiHandler(s *Server) http.Handler {
 				inTok = tokens.EstimatePrompt(model, promptText)
 				outTok = tokens.EstimateCompletion(model, completionText)
 			} else {
+				// v0.4: measure EstimateCompletion (the estimator the fallback bills
+				// with, incl. +100 round-up) on the completion text — previously
+				// EstimatePrompt(completionText) compared against outTok, which is
+				// the wrong side + structurally biased low (no round-up).
 				tokens.RecordSample("openai", model,
-					tokens.EstimatePrompt(model, completionText), outTok)
+					tokens.EstimateCompletion(model, completionText), outTok)
 			}
 			usd := budget.CostFromUsageWithProvider("openai", model, inTok, outTok)
 			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {
