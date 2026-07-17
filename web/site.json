@@ -7,16 +7,16 @@
   "accent": ["#F59E0B"],
   "hero": {
     "eyebrow": {
-      "zh": "本地代理 · 无守护进程 · 单二进制 · 零遥测",
-      "en": "Local proxy · No daemon · Single binary · Zero telemetry"
+      "zh": "到顶即停 · 请求不出本机 · 不挂后台 · 不回传数据",
+      "en": "Stops at the cap · Stays on your machine · No background process · Phones nothing home"
     },
     "headline": {
-      "zh": "硬性卡住你的编码 Agent 花费\n在任何请求离开本机之前",
-      "en": "Hard-cap your coding-agent spend\nbefore a single request leaves your machine"
+      "zh": "给编码 Agent 设一道硬上限\n到顶就停，下一条请求不出本机",
+      "en": "A hard cap on what your coding agent can spend\n— it stops at the line, before the next request leaves"
     },
     "sub": {
-      "zh": "单个 Go 二进制把你的 claude、codex 或 aider CLI 作为子进程 exec，指向本地代理，按项目美元上限熔断，写入本地 bbolt 账本——无守护进程、无云端、无遥测。",
-      "en": "A single Go binary execs your claude, codex, or aider CLI as a child, points it at a local proxy, and fail-closes at a per-project USD cap written to a local bbolt ledger — no daemon, no cloud, no telemetry."
+      "zh": "在项目根目录放一个 .fuse.toml，写上这项目最多花几美元。你的 claude、codex、aider 跑过夜循环时，累计花费一到上限就停——下一条请求直接在本机被挡回。不挂后台、不上云、不回传任何数据。一个会偷偷回传数据的熔断器，本身就是问题。",
+      "en": "Drop a .fuse.toml at your project root with a USD cap. When your claude, codex, or aider runs an overnight loop, the moment cumulative spend hits the cap it stops — the next request is turned back at your machine. No background process, no cloud, nothing phoned home. A kill-switch that phones home is itself the problem."
     },
     "command": "fuse run claude",
     "cta": { "zh": "开始使用", "en": "Get started" },
@@ -24,57 +24,57 @@
   },
   "advantages": [
     {
-      "title": { "zh": "到顶即熔断，并发也冲不过", "en": "Fail-closed at the cap — even under concurrency" },
+      "title": { "zh": "到顶就停，并发也冲不过上限", "en": "Stops at the cap — even under concurrent load" },
       "body": {
-        "zh": "每个请求走四道 fail-closed 闸：账号指纹、tiktoken 预估、账本对账、cap_usd 判定。v0.4 把 Reserve→CommitDelta 原子守卫从 anthropic、openai 铺到 deepseek、gemini、openai_compat——五个 provider 上并发请求再也没法集体冲过上限。",
-        "en": "Every request clears four fail-closed gates: account fingerprint, tiktoken pre-flight, ledger check, then a cap_usd verdict. v0.4 propagates the atomic Reserve→CommitDelta guard from anthropic and openai out to deepseek, gemini, and openai_compat — concurrent requests can no longer collectively overshoot the cap on any of the five providers."
+        "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。没有“差一点没卡住”这种事。",
+        "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. There's no 'almost held' here."
       },
       "chips": [
-        "› 四道 fail-closed 闸",
-        "› HTTP 402 拒绝",
-        "› 原子 Reserve/CommitDelta（全 5 provider）"
+        "› 每条请求出门前核对",
+        "› 到顶即挡回",
+        "› 并发也守得住"
       ]
     },
     {
-      "title": { "zh": "一个二进制，五种 wire format", "en": "One binary, five wire formats" },
+      "title": { "zh": "不管你用哪家的模型，上限都一样", "en": "Same cap, whichever model you run" },
       "body": {
-        "zh": "同一个 fuse run、同一份 .fuse.toml，接 Anthropic、OpenAI、Gemini、DeepSeek 和任意 OpenAI-compat 主机（Groq、Mistral、xAI、Together、OpenRouter）。流式响应漏报 usage 时，本地 tiktoken 兜底补计，账本绝不 silently 记一笔 $0。",
-        "en": "One fuse run, one .fuse.toml, five provider families — Anthropic, OpenAI, Gemini, DeepSeek, and any OpenAI-compat host (Groq, Mistral, xAI, Together, OpenRouter). When a stream omits the usage block, a local tiktoken fallback bills it instead — the ledger never silently records $0."
+        "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务。流式回复漏报花费时，agentfuse 在本地把花费补回来——绝不会悄悄记一笔 $0，让上限形同虚设。",
+        "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured. And when a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0 and lets the cap drift."
       },
       "chips": [
-        "› 5 个 provider 处理器",
-        "› 流式 SSE 逐帧取 usage",
-        "› tiktoken 本地兜底"
+        "› 一份配置管所有模型服务",
+        "› 漏报花费本地补回",
+        "› 绝不记一笔 $0"
       ]
     },
     {
-      "title": { "zh": "价格表本地化，永不联网", "en": "Price table stays local, never networked" },
+      "title": { "zh": "价格表在你本机，从不联网", "en": "Prices live on your machine, never fetched" },
       "body": {
-        "zh": "价格快照打进二进制，用 ~/.fuse/prices.toml 按机器覆盖，二进制从不联网取价——这是信任前提。新的 fuse prices --diff 让价格漂移可见：哪些覆盖压住了 bundle 已变动的默认值，哪些用户条目指向 bundle 已退役的模型。",
-        "en": "The price snapshot is embedded in the binary; you override per-machine via ~/.fuse/prices.toml. The binary never fetches prices over the network — that is the trust premise. The new fuse prices --diff makes drift visible: which of your overrides shadow a bundled default that has since moved, and which of your entries point at a model the bundle has retired."
+        "zh": "模型价格内置在工具里，你可以按机器覆盖。agentfuse 从不联网取价——这是它能当熔断器的前提。fuse prices --diff 还会告诉你：你的本地覆盖里，哪些压住了已变动的默认值，哪些指向已经下架的模型。",
+        "en": "Model prices ship inside the tool; you override them per machine. agentfuse never fetches a price over the network — that's the premise for a tool allowed to cut off your spend. fuse prices --diff shows which of your overrides shadow a default that has since moved, and which point at a model that has since been retired."
       },
       "chips": [
-        "› bundle 内嵌 + 用户覆盖",
-        "› fuse prices --diff 漂移检测",
-        "› 零网络取价"
+        "› 价格内置，可覆盖",
+        "› fuse prices --diff 看漂移",
+        "› 零联网取价"
       ]
     },
     {
-      "title": { "zh": "本地账本，无守护，单二进制", "en": "Local ledger, no daemon, one binary" },
+      "title": { "zh": "全部留在本机，三十秒能审完", "en": "Everything stays local — auditable in 30 seconds" },
       "body": {
-        "zh": "账本写在 ~/.fuse/ledger.db（bbolt，键为 (project, day)），代理随子进程退出而消亡。除了你点名的上游 provider，二进制不与任何东西通信。用 strings 三十秒就能审计完——一个会回传数据的熔断器本身就是信任问题。",
-        "en": "The ledger lives at ~/.fuse/ledger.db (bbolt, keyed by (project, day)); the proxy dies with the wrapped child. The binary talks to nothing but the upstream provider you configured. Audit it with strings in thirty seconds — a kill-switch that phones home is itself the trust problem."
+        "zh": "花费只写在你本机的一个文件里，工具随你那条 Agent 命令一起退出，不挂后台。除了你配的那家模型服务，它不和任何东西通信。三十秒就能审完它会不会回传数据——一个会偷偷回传的熔断器，本身就是信任问题。",
+        "en": "Spend is written to a single file on your machine; the tool exits with the agent command it wrapped — nothing lingers in the background. It talks to nothing but the model service you configured. You can audit in thirty seconds whether it phones anything home — a kill-switch that phones home is itself the trust problem."
       },
       "chips": [
-        "› bbolt 本地账本",
-        "› 代理随子进程退出",
-        "› strings 30 秒可审计"
+        "› 花费只写本机",
+        "› 不挂后台",
+        "› 三十秒可审"
       ]
     }
   ],
   "scene": {
     "kind": "hub-nodes",
-    "nodes": ["Anthropic", "OpenAI", "Gemini", "DeepSeek", "OpenAI-compat"]
+    "nodes": ["Overnight loop", "Wrong account", "Budget drain", "Untracked spend"]
   },
   "cta": {
     "headline": {
@@ -82,15 +82,15 @@
       "en": "One .fuse.toml, one cap per project"
     },
     "sub": {
-      "zh": "开源、MIT、无付费墙。本地代理这一核心动作，永不设墙。",
-      "en": "Open source, MIT, no paywall. The core act of proxying locally is never gated."
+      "zh": "开源、MIT、无付费墙。在你本机给 Agent 设上限这件事，永不收费。",
+      "en": "Open source, MIT, no paywall. The act of capping your agent locally is never gated."
     },
     "button": { "zh": "在 GitHub 上开始", "en": "Get started on GitHub" }
   },
   "footer": {
     "tag": {
-      "zh": "给编码 Agent CLI 装的本地花费熔断器",
-      "en": "The local kill-switch proxy for coding-agent CLI spend"
+      "zh": "给编码 Agent 花费装的本地熔断器",
+      "en": "The local kill-switch for coding-agent spend"
     }
   }
 }
