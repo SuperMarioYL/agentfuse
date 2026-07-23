@@ -32,7 +32,11 @@ type anthropicResponse struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
-	Model string `json:"model"`
+	Model   string `json:"model"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
 }
 
 func anthropicHandler(s *Server) http.Handler {
@@ -144,11 +148,18 @@ func anthropicHandler(s *Server) http.Handler {
 				// Both upstream usage AND a local estimate are available — record
 				// the comparison so the §8 >25% accuracy criterion is measurable.
 				// v0.4: use EstimateCompletion (the estimator the fallback actually
-				// bills with, incl. the +100 round-up) on the completion text — the
+				// bills with, incl. +100 round-up) on the completion text — the
 				// harness must measure the estimator the cap uses, not EstimatePrompt
 				// run on completion text (wrong side + no round-up = biased-low).
-				tokens.RecordSample("anthropic", model,
-					tokens.EstimateCompletion(model, completionText), outTok)
+				// v0.5.0: guard — skip the sample when completionText is still "".
+				// An empty completion yields EstimateCompletion(model,"")=100
+				// (roundUp n<=0 -> step), which false-triggers the §8 >25% kill
+				// criterion the harness was built to make evaluable. There is
+				// nothing meaningful to compare against outTok in that case.
+				if completionText != "" {
+					tokens.RecordSample("anthropic", model,
+						tokens.EstimateCompletion(model, completionText), outTok)
+				}
 			}
 			usd := budget.CostFromUsageWithProvider("anthropic", model, inTok, outTok)
 			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {
@@ -199,7 +210,14 @@ func parseAnthropicUsage(body []byte) (int, int, string, string) {
 	if err := json.Unmarshal(body, &unary); err == nil &&
 		(unary.Usage.InputTokens > 0 || unary.Usage.OutputTokens > 0 || unary.Model != "") {
 		if unary.Usage.InputTokens > 0 || unary.Usage.OutputTokens > 0 {
-			return unary.Usage.InputTokens, unary.Usage.OutputTokens, "", unary.Model
+			// v0.5.0: fix-accuracy-harness-empty-completion-unary — the unary
+			// branch previously returned "" for completionText, so RecordSample
+			// measured EstimateCompletion(model, "")=100 on every unary response
+			// regardless of real completion length, false-triggering the §8 >25%
+			// kill criterion. Extract the content-block text so the harness
+			// measures a real estimate on unary traffic too.
+			return unary.Usage.InputTokens, unary.Usage.OutputTokens,
+				anthropicContentText(unary.Content), unary.Model
 		}
 	}
 
@@ -248,6 +266,25 @@ func parseAnthropicUsage(body []byte) (int, int, string, string) {
 	return inTok, outTok, text.String(), model
 }
 
+// anthropicContentText flattens the content blocks of a unary Anthropic
+// response into one string, so the accuracy harness can EstimateCompletion on
+// the real completion text instead of "" (which rounds up to 100 and
+// false-triggers the §8 >25% kill criterion on unary traffic). Text blocks
+// contribute their text; non-text blocks (tool_use, etc.) contribute nothing —
+// they are not billed as completion tokens by the estimator.
+func anthropicContentText(blocks []struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}) string {
+	var b strings.Builder
+	for _, blk := range blocks {
+		if blk.Type == "text" || blk.Type == "" {
+			b.WriteString(blk.Text)
+		}
+	}
+	return b.String()
+}
+
 // anthropicPromptText flattens an Anthropic Messages request body into one big
 // string for tiktoken estimation when the upstream omits usage entirely.
 func anthropicPromptText(body []byte) string {
@@ -291,9 +328,27 @@ func estimatePromptTokens(body []byte) int {
 func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
 		// Drop hop-by-hop and host headers; let Go re-set transport.
+		// Accept-Encoding is also dropped: Go's http transport only
+		// auto-decompresses a gzipped response when IT added the
+		// Accept-Encoding header. A caller-set value (Go/Node/fetch add
+		// "gzip" by default) is forwarded verbatim, the upstream then
+		// gzips the unary JSON body, and the transport passes the raw
+		// \x1f\x8b bytes through untouched — so io.ReadAll(resp.Body)
+		// yields gzip bytes, parseAnthropicUsage/parseDeepSeekUsage
+		// json.Unmarshal them into an error (in=0, out=0,
+		// completionText=""), and the per-side fallback bills
+		// promptTokens + EstimateCompletion(model, "")=100 instead of
+		// the real usage. For a unary response with thousands of real
+		// output tokens that under-bills by orders of magnitude, so
+		// realized spend can exceed the cap without tripping it
+		// (fail-open) — the exact property this product exists to
+		// prevent. Stripping it here lets the proxy's own transport
+		// manage gzip (adds Accept-Encoding, decompresses, strips
+		// Content-Encoding) for all five handlers that share this
+		// copier. v0.5.0: fix-gzip-accept-encoding-forwarded.
 		if k == "Connection" || k == "Keep-Alive" || k == "Proxy-Connection" ||
 			k == "Te" || k == "Trailer" || k == "Transfer-Encoding" || k == "Upgrade" ||
-			k == "Host" || k == "Content-Length" {
+			k == "Host" || k == "Content-Length" || k == "Accept-Encoding" {
 			continue
 		}
 		for _, v := range vv {

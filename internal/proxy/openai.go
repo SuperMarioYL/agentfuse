@@ -31,6 +31,18 @@ type openaiResponse struct {
 		OutputTokens     int `json:"output_tokens"`
 	} `json:"usage"`
 	Model string `json:"model"`
+	// Choices carries the assistant message on a unary (non-streamed) Chat
+	// Completions response. v0.5.0: fix-accuracy-harness-empty-completion-unary
+	// — the unary parseDeepSeekUsage branch (reused by openai.go) returned ""
+	// for completionText, so RecordSample measured EstimateCompletion(model,
+	// "")=100 on every unary OpenAI/DeepSeek response. Extracting
+	// choices[].message.content here lets the harness measure a real estimate.
+	Choices []struct {
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
 func openaiHandler(s *Server) http.Handler {
@@ -135,8 +147,15 @@ func openaiHandler(s *Server) http.Handler {
 				// with, incl. +100 round-up) on the completion text — previously
 				// EstimatePrompt(completionText) compared against outTok, which is
 				// the wrong side + structurally biased low (no round-up).
-				tokens.RecordSample("openai", model,
-					tokens.EstimateCompletion(model, completionText), outTok)
+				// v0.5.0: guard — skip the sample when completionText is still "".
+				// An empty completion yields EstimateCompletion(model,"")=100
+				// (roundUp n<=0 -> step), which false-triggers the §8 >25% kill
+				// criterion the harness was built to make evaluable. There is
+				// nothing meaningful to compare against outTok in that case.
+				if completionText != "" {
+					tokens.RecordSample("openai", model,
+						tokens.EstimateCompletion(model, completionText), outTok)
+				}
 			}
 			usd := budget.CostFromUsageWithProvider("openai", model, inTok, outTok)
 			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {

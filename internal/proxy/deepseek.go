@@ -173,7 +173,16 @@ func parseDeepSeekUsage(body []byte) (int, int, string, string) {
 			outTok = unary.Usage.OutputTokens
 		}
 		if inTok > 0 || outTok > 0 {
-			return inTok, outTok, "", unary.Model
+			// v0.5.0: fix-accuracy-harness-empty-completion-unary — extract
+			// choices[].message.content so RecordSample (called by openai.go,
+			// which reuses this parser) measures a real
+			// EstimateCompletion(model, completionText) instead of
+			// EstimateCompletion(model, "")=100 on unary traffic.
+			var text strings.Builder
+			for _, c := range unary.Choices {
+				text.WriteString(c.Message.Content)
+			}
+			return inTok, outTok, text.String(), unary.Model
 		}
 	}
 
