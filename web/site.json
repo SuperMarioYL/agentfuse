@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "content_version": "v0.5.0",
   "name": "agentfuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
@@ -26,25 +27,27 @@
     {
       "title": { "zh": "到顶就停，并发也冲不过上限", "en": "Stops at the cap — even under concurrent load" },
       "body": {
-        "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。没有“差一点没卡住”这种事。",
-        "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. There's no 'almost held' here."
+        "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。以前有一类请求能让花费悄悄绕过上限，现在每一条都照算、照挡。没有“差一点没卡住”这种事。",
+        "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. A kind of request that once let spend slip quietly past the cap is now counted and held like every other. There's no 'almost held' here."
       },
       "chips": [
         "› 每条请求出门前核对",
         "› 到顶即挡回",
-        "› 并发也守得住"
+        "› 并发也守得住",
+        "› 没有一种请求能绕过上限"
       ]
     },
     {
       "title": { "zh": "不管你用哪家的模型，上限都一样", "en": "Same cap, whichever model you run" },
       "body": {
-        "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务。流式回复漏报花费时，agentfuse 在本地把花费补回来——绝不会悄悄记一笔 $0，让上限形同虚设。",
-        "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured. And when a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0 and lets the cap drift."
+        "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务。流式回复漏报花费时，agentfuse 在本地把花费补回来——绝不悄悄记一笔 $0，让上限形同虚设。这条本地估算是逐条校准过的：不管回复是流式吐出来的还是一次性返回的，估出来的花费都经得起对账。",
+        "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured. And when a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0 and lets the cap drift. That local estimate is calibrated reply by reply: whether a response streams or comes back in one piece, the figured cost stands up to a recount."
       },
       "chips": [
         "› 一份配置管所有模型服务",
         "› 漏报花费本地补回",
-        "› 绝不记一笔 $0"
+        "› 绝不记一笔 $0",
+        "› 估算逐条经得起对账"
       ]
     },
     {
