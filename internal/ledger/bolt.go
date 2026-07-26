@@ -116,6 +116,12 @@ func (l *Ledger) addLocked(project string, tokensIn, tokensOut int, usd float64)
 func (l *Ledger) Today(project string) (Entry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.todayLocked(project)
+}
+
+// todayLocked returns today's persisted entry for project (or zero if none).
+// Caller MUST hold l.mu.
+func (l *Ledger) todayLocked(project string) (Entry, error) {
 	k := key(project, time.Now())
 	var out Entry
 	err := l.db.View(func(tx *bolt.Tx) error {
@@ -161,6 +167,29 @@ func (l *Ledger) projectTotalLocked(project string) (Entry, error) {
 	return sum, err
 }
 
+// WindowedTotal returns the spend base for the cap check according to window:
+// "daily" => only today's persisted entry; "project"/""/default => every
+// persisted day for the project. It does NOT include in-flight reservations.
+// Handlers use it for the !allowed Decide reason so the projected spend shown
+// to the user matches the window ReserveWindowed actually enforced. Before
+// v0.6.0 the handlers always used ProjectTotal, so a window="daily" cap was
+// reported and enforced as a lifetime project cap (over-deny from day 2).
+func (l *Ledger) WindowedTotal(project, window string) (Entry, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.windowedTotalLocked(project, window)
+}
+
+// windowedTotalLocked is the locked variant of WindowedTotal. Caller MUST hold
+// l.mu. "daily" reads only today's entry; anything else falls through to the
+// lifetime project total.
+func (l *Ledger) windowedTotalLocked(project, window string) (Entry, error) {
+	if window == "daily" {
+		return l.todayLocked(project)
+	}
+	return l.projectTotalLocked(project)
+}
+
 // Reserve atomically performs the check-then-spend decision: under one lock it
 // re-reads the persisted project total, adds every in-flight reservation for the
 // same project, and rejects (ok=false) if total+inflight+estimateUSD would
@@ -172,10 +201,29 @@ func (l *Ledger) projectTotalLocked(project string) (Entry, error) {
 // read ProjectTotal, decided, forwarded, then Add'ed — with no lock spanning the
 // decision, N concurrent requests could all pass the cap check before any Add
 // landed and collectively overshoot the cap by up to (N-1) per-request costs.
+// Reserve atomically performs the check-then-spend decision using the LIFETIME
+// project total as the cap base (window="project"). Retained for backwards
+// compatibility with the v0.3.0 callers/tests; new callers should use
+// ReserveWindowed so Config.Window ("daily"|"project") is honored.
 func (l *Ledger) Reserve(project string, capUSD, estimateUSD float64) (bool, error) {
+	return l.ReserveWindowed(project, "project", capUSD, estimateUSD)
+}
+
+// ReserveWindowed is the window-aware atomic check-then-spend: under one lock
+// it reads the cap base for window ("daily" => only today's persisted entry;
+// "project"/""/default => every persisted day for the project), adds every
+// in-flight reservation for the same project, and rejects (ok=false) if
+// base+inflight+estimateUSD would exceed capUSD. On success it records the
+// reservation and returns ok=true; the caller MUST later call exactly one of
+// CommitDelta (with the realized cost) or Release.
+//
+// Before v0.6.0 Reserve always used the lifetime project total, so a
+// window="daily" cap was enforced as a lifetime project cap (over-deny from
+// day 2 onward) — a broken-promise correctness defect in the fail-closed path.
+func (l *Ledger) ReserveWindowed(project, window string, capUSD, estimateUSD float64) (bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	persisted, err := l.projectTotalLocked(project)
+	persisted, err := l.windowedTotalLocked(project, window)
 	if err != nil {
 		return false, err
 	}

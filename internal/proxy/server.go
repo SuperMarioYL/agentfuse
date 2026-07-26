@@ -20,6 +20,15 @@ type Server struct {
 	led         *ledger.Ledger
 	accounts    *account.File
 
+	// upstream is the shared HTTP client used to forward to provider
+	// endpoints. It carries a wall-clock Timeout (5m by default) so a stalled
+	// upstream cannot hold the handler goroutine — and its ledger reservation —
+	// indefinitely (http.DefaultClient has Timeout=0). A timed-out upstream
+	// call errors out of the handler, which runs the deferred Release so the
+	// reservation stops starving the project budget. Same-package tests may
+	// swap in a shorter-timeout client.
+	upstream *http.Client
+
 	httpSrv  *http.Server
 	listener net.Listener
 	wg       sync.WaitGroup
@@ -35,6 +44,7 @@ func New(projectRoot string, cfg *budget.Config, led *ledger.Ledger, accts *acco
 		projectRoot: projectRoot,
 		led:         led,
 		accounts:    accts,
+		upstream:    &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

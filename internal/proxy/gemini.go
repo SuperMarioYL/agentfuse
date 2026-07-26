@@ -100,13 +100,13 @@ func geminiHandler(s *Server) http.Handler {
 		// path — the v0.3.0 Reserve/CommitDelta fix only landed in anthropic+openai,
 		// so 3/5 providers (deepseek/gemini/openai_compat) could still overshoot under
 		// concurrency. Now matches the atomic discipline of the other handlers.
-		allowed, err := s.led.Reserve(s.projectRoot, s.cfg.CapUSD, estimate)
+		allowed, err := s.led.ReserveWindowed(s.projectRoot, s.cfg.Window, s.cfg.CapUSD, estimate)
 		if err != nil {
 			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
 			return
 		}
 		if !allowed {
-			total, _ := s.led.ProjectTotal(s.projectRoot)
+			total, _ := s.led.WindowedTotal(s.projectRoot, s.cfg.Window)
 			decision := budget.Decide(total.USD, s.cfg.CapUSD, estimate, s.projectRoot)
 			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
 				decision.Reason, decision.SuggestedCmd)
@@ -138,7 +138,7 @@ func geminiHandler(s *Server) http.Handler {
 		copyHeader(upReq.Header, r.Header)
 		upReq.Host = upstreamURL.Host
 
-		resp, err := http.DefaultClient.Do(upReq)
+		resp, err := s.upstream.Do(upReq)
 		if err != nil {
 			writeFuseError(w, http.StatusBadGateway, "upstream call: "+err.Error(), "")
 			return
@@ -208,7 +208,7 @@ func geminiPromptText(req *geminiRequest) string {
 // the last frame's usageMetadata wins; the concatenated candidate text is
 // returned for tiktoken fallback when usage is absent.
 func parseGeminiUsage(body []byte) (int, int, string) {
-	// Fast path: a single JSON object (unary :generateContent).
+	// Fast path 1: a single JSON object (unary :generateContent).
 	var single geminiResponse
 	if err := json.Unmarshal(body, &single); err == nil && (single.UsageMetadata.PromptTokenCount > 0 || single.UsageMetadata.CandidatesTokenCount > 0 || len(single.Candidates) > 0) {
 		return single.UsageMetadata.PromptTokenCount,
@@ -216,8 +216,39 @@ func parseGeminiUsage(body []byte) (int, int, string) {
 			extractGeminiText(&single)
 	}
 
-	// Stream path: each frame is a JSON object. Final frame carries
-	// usageMetadata; earlier frames carry incremental candidate text.
+	// Fast path 2: a JSON-array streamGenerateContent body — one compact line
+	// `[{...},{...}]` or pretty-printed `[ { ... } ]`. A client that calls
+	// streamGenerateContent WITHOUT alt=sse gets this shape: one JSON array of
+	// frames, the last carrying usageMetadata. The SSE line-walker below skips
+	// every line starting with `[` (its skip-rule), so without this path the
+	// whole array is dropped -> in=0, out=0, completionText="" -> the per-side
+	// fallback bills promptTokens + EstimateCompletion(model,"")=100 regardless
+	// of real output, a fail-open cap-correctness defect (realized spend can
+	// exceed the cap without tripping it). Same class as the v0.5.0 gzip fix.
+	trimmed := bytes.TrimSpace(body)
+	if bytes.HasPrefix(trimmed, []byte("[")) {
+		var frames []geminiResponse
+		if err := json.Unmarshal(trimmed, &frames); err == nil {
+			var (
+				lastUsage geminiResponse
+				fullText  strings.Builder
+			)
+			for i := range frames {
+				if frames[i].UsageMetadata.CandidatesTokenCount > 0 || frames[i].UsageMetadata.PromptTokenCount > 0 {
+					lastUsage = frames[i]
+				}
+				fullText.WriteString(extractGeminiText(&frames[i]))
+			}
+			return lastUsage.UsageMetadata.PromptTokenCount,
+				lastUsage.UsageMetadata.CandidatesTokenCount,
+				fullText.String()
+		}
+	}
+
+	// Stream path: each frame is a JSON object (SSE, one per line, possibly
+	// prefixed with "data:"). Final frame carries usageMetadata; earlier frames
+	// carry incremental candidate text. Reached only when the body is neither a
+	// single JSON object nor a JSON array.
 	var (
 		lastUsage geminiResponse
 		fullText  strings.Builder

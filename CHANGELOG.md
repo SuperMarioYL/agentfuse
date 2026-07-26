@@ -6,6 +6,53 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-27
+
+A quiet cap-correctness/availability release. v0.5.0 closed the gzip
+`Accept-Encoding` fail-open defect across the four non-Gemini handlers and
+calibrated the unary accuracy harness, but a HIGH fail-open cap-correctness
+defect remained in the Gemini JSON-array stream path, and two same-cluster
+MEDIUM defects (`Config.Window` silently ignored; the upstream HTTP client had
+no timeout) undermined the cap-correctness promise from the fail-closed
+direction. v0.6.0 closes all three and continues the v0.3/v0.4/v0.5 quiet
+release posture.
+
+### Fixed
+- **Gemini JSON-array streamGenerateContent under-billing**
+  (`internal/proxy/gemini.go`): `parseGeminiUsage` only unmarshaled a single
+  JSON object in its fast path and its SSE line-walker skipped every
+  `[`-prefixed line, so a JSON-array `streamGenerateContent` body (one compact
+  line `[{...},{...}]` or pretty `[ { ... } ]` — the shape a client gets without
+  `alt=sse`) was dropped entirely: in=0, out=0, completionText="" and the
+  per-side fallback billed promptTokens +
+  `EstimateCompletion(model,"")=100` regardless of real output. A streamed
+  Gemini completion with thousands of real output tokens billed 100, so
+  realized spend could exceed the cap without tripping it (fail-open) — the
+  same property the v0.5.0 gzip fix closes for unary traffic. `parseGeminiUsage`
+  now detects a leading `[` and unmarshals the body as a `[]geminiResponse`,
+  accumulating candidate text per frame and taking the last frame's
+  `usageMetadata`; the SSE line-walker is reached only when the body is neither
+  a single object nor an array.
+- **`window = "daily"` silently enforced as a lifetime cap**
+  (`internal/ledger/bolt.go`): `Config.Window` was accepted by `budget.Load` and
+  surfaced in `fuse status` but `Reserve`/`ProjectTotal` never consulted it —
+  `projectTotalLocked` summed every persisted day, so a daily cap was enforced
+  as a lifetime project cap (over-deny from day 2 onward; a broken-promise
+  correctness defect in the fail-closed path). The ledger now exposes
+  `ReserveWindowed`/`WindowedTotal` that read only today's entry for
+  `window="daily"` and the lifetime total for `"project"`/default; all five
+  handlers (anthropic, openai, deepseek, gemini, openai_compat) reserve and
+  build the `!allowed` reason off the windowed total. The bare `Reserve` entry
+  point still behaves as `window="project"` for backwards compatibility.
+- **Upstream HTTP client had no timeout** (`internal/proxy/server.go` + the five
+  handlers): all handlers forwarded via `http.DefaultClient` (`Timeout=0`) and
+  buffered the whole upstream body, so a stalled upstream held the handler
+  goroutine — and its ledger reservation — with no TTL, starving the project
+  budget until process restart. The `Server` now carries a shared
+  `*http.Client{Timeout: 5*time.Minute}` used by all five handlers, so a stalled
+  upstream errors out of the handler and runs the deferred `Release`, returning
+  the reservation to the available budget.
+
 ## [0.4.0] — 2026-07-17
 
 A correctness-completion release. v0.3.0 shipped the atomic `Reserve`/`CommitDelta`

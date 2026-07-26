@@ -77,14 +77,14 @@ func anthropicHandler(s *Server) http.Handler {
 		// 3. Enforce — atomically reserve the estimate so concurrent requests
 		// cannot all pass the cap check and collectively overshoot. On any exit
 		// path below we MUST release or commit the reservation exactly once.
-		allowed, err := s.led.Reserve(s.projectRoot, s.cfg.CapUSD, estimate)
+		allowed, err := s.led.ReserveWindowed(s.projectRoot, s.cfg.Window, s.cfg.CapUSD, estimate)
 		if err != nil {
 			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
 			return
 		}
 		if !allowed {
 			// Fail-closed — stderr line + HTTP 402 with JSON body.
-			total, _ := s.led.ProjectTotal(s.projectRoot)
+			total, _ := s.led.WindowedTotal(s.projectRoot, s.cfg.Window)
 			decision := budget.Decide(total.USD, s.cfg.CapUSD, estimate, s.projectRoot)
 			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
 				decision.Reason, decision.SuggestedCmd)
@@ -114,7 +114,7 @@ func anthropicHandler(s *Server) http.Handler {
 		copyHeader(upReq.Header, r.Header)
 		upReq.Host = upstreamURL.Host
 
-		resp, err := http.DefaultClient.Do(upReq)
+		resp, err := s.upstream.Do(upReq)
 		if err != nil {
 			writeFuseError(w, http.StatusBadGateway, "upstream call: "+err.Error(), "")
 			return
