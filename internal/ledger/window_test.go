@@ -39,10 +39,13 @@ func seedDay(t *testing.T, l *Ledger, project, day string, usd float64) {
 func TestWindowedCapResetsAcrossDayBoundary(t *testing.T) {
 	l := mustOpen(t)
 
-	// Two past days — neither is "today", so the daily window must exclude both
-	// while the project window must sum them.
-	twoDaysAgo := time.Now().UTC().AddDate(0, 0, -2).Format("2006-01-02")
-	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	// Two past LOCAL days — neither is today (local), so the daily window
+	// must exclude both while the project window must sum them. v0.7: seeded in
+	// the process LOCAL timezone (not UTC) so the day strings match the
+	// local-date bucket key the ledger now uses; seeding UTC dates would flake
+	// near midnight in non-UTC zones where today's local date == "yesterday UTC".
+	twoDaysAgo := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 
 	const (
 		dailyWindow   = "daily"
@@ -120,5 +123,109 @@ func TestWindowedTotalDefaultsToProject(t *testing.T) {
 	ok, err := l.Reserve(proj, 5.00, 0.50)
 	if err != nil || !ok {
 		t.Fatalf("bare Reserve (project window) should allow: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestDailyWindowResetsAtLocalMidnight is the v0.7.0 regression test for the
+// daily-window-UTC-reset defect (fix-daily-window-utc-reset). key() previously
+// built the daily bucket with day.UTC().Format("2006-01-02"), so a
+// window="daily" cap reset at UTC midnight rather than the user's local
+// midnight for any non-UTC user, and `fuse status`'s "today:" line reported
+// the UTC day's spend. With the .UTC() dropped, the bucket keys on the process
+// (user) LOCAL date.
+//
+// Deterministic by design: a fake clock (setNow) is pinned to two moments that
+// sit on the SAME UTC date but OPPOSITE local dates — late evening local
+// 2026-07-30 23:00 (== 2026-07-31 04:00 UTC) and just after local midnight
+// 2026-07-31 00:30 (== 2026-07-31 05:30 UTC), in a fixed UTC-5 zone. Under the
+// old .UTC() key both moments share the 2026-07-31 UTC date, so spend placed
+// at "yesterday late" would NOT reset across local midnight (the defect).
+// Under the fix, "today" is the local 2026-07-31 bucket, which is empty — the
+// daily cap reset at local midnight. The project window must NOT reset (it
+// sums every persisted day regardless of the date key).
+func TestDailyWindowResetsAtLocalMidnight(t *testing.T) {
+	l := mustOpen(t)
+	// Fixed non-UTC zone (UTC-5) so local midnight and UTC midnight differ.
+	loc := time.FixedZone("TEST-UTC-5", -5*60*60)
+	// Late evening local 2026-07-30 23:00 == 2026-07-31 04:00 UTC: under the
+	// old .UTC() key this Add lands in the 2026-07-31 UTC bucket.
+	yesterdayLate := time.Date(2026, 7, 30, 23, 0, 0, 0, loc)
+	// Just after local midnight 2026-07-31 00:30 == 2026-07-31 05:30 UTC:
+	// under the old .UTC() key this is STILL the 2026-07-31 UTC bucket, so the
+	// spend above would NOT reset across local midnight (the defect). Under
+	// the fix, "today" is the local 2026-07-31 bucket, which is empty.
+	todayEarly := time.Date(2026, 7, 31, 0, 30, 0, 0, loc)
+
+	const (
+		proj      = "/tz/daily"
+		capUSD    = 5.00
+		pastSpend = 4.60 // persisted on the prior LOCAL day
+		estimate  = 0.50
+	)
+
+	// Place spend while the clock reads late-evening local 2026-07-30.
+	restore := l.setNow(yesterdayLate)
+	if _, err := l.Add(proj, 0, 0, pastSpend); err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: while still on the prior local day, the daily window sees it.
+	yest, err := l.WindowedTotal(proj, "daily")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if yest.USD != pastSpend {
+		t.Fatalf("sanity: daily window at yesterday-late should be $%.2f, got $%.2f", pastSpend, yest.USD)
+	}
+	restore()
+
+	// Advance the clock across LOCAL midnight to 2026-07-31 00:30 local.
+	restore = l.setNow(todayEarly)
+	defer restore()
+
+	// --- daily window: resets at LOCAL midnight ---
+	tot, err := l.WindowedTotal(proj, "daily")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tot.USD != 0 {
+		t.Fatalf("daily window should reset at LOCAL midnight: spend on local 2026-07-30 must be excluded on local 2026-07-31, got $%.2f — the bucket still keys on UTC", tot.USD)
+	}
+	// `fuse status` "today" tracks the LOCAL day for the same reason (Today
+	// goes through the same key as the daily window). Under the old UTC key it
+	// would report the UTC day's spend ($4.60), not the local day's ($0).
+	today, err := l.Today(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if today.USD != 0 {
+		t.Fatalf("Today should track the LOCAL day ($0 on local 2026-07-31), got $%.2f — status 'today' keys on UTC", today.USD)
+	}
+	// A daily cap reserve must now succeed: the window reset, so $0 persisted
+	// + reserved + estimate stays under the cap. Under the old UTC key the
+	// daily window would read $4.60 and this reserve would be denied
+	// (projected $5.10 > $5.00) — the over-deny-from-day-2 defect.
+	ok, err := l.ReserveWindowed(proj, "daily", capUSD, estimate)
+	if err != nil || !ok {
+		t.Fatalf("daily cap should allow after local-midnight reset: ok=%v err=%v", ok, err)
+	}
+	l.Release(proj, estimate)
+
+	// --- project window: does NOT reset across LOCAL midnight ---
+	projTot, err := l.WindowedTotal(proj, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projTot.USD != pastSpend {
+		t.Fatalf("project window should sum every persisted day ($%.2f), got $%.2f — project cap must NOT reset at local midnight", pastSpend, projTot.USD)
+	}
+	// Same past spend + estimate must now DENY on the project window: the
+	// project cap does not reset, so the prior day's $4.60 is still counted.
+	ok, err = l.ReserveWindowed(proj, "project", capUSD, estimate)
+	if err != nil {
+		t.Fatalf("project reserve errored: %v", err)
+	}
+	if ok {
+		t.Fatalf("project cap must NOT reset across local midnight: $%.2f persisted + $%.2f estimate should be denied (projected $%.2f > cap $%.2f)",
+			pastSpend, estimate, pastSpend+estimate, capUSD)
 	}
 }

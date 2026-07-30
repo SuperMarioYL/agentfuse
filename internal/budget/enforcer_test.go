@@ -48,3 +48,35 @@ func TestCostFromUsage(t *testing.T) {
 		t.Fatalf("got %v want %v", usd, want)
 	}
 }
+
+// TestDenyDecisionAlwaysNonEmpty is the v0.7.0 unit test for the
+// fix-concurrent-deny-empty-reason deny formatter. DenyDecision is the
+// !allowed-branch counterpart to Decide: it never consults Allow, so it
+// ALWAYS returns a non-empty Reason + SuggestedCmd — even when the projected
+// total it is handed is at or below the cap, which is exactly the case where
+// the persisted-only Decide path returns an empty reason (the concurrent-deny
+// defect: persisted + estimate <= cap but persisted + reserved + estimate >
+// cap, which requires reserved > 0).
+func TestDenyDecisionAlwaysNonEmpty(t *testing.T) {
+	d := DenyDecision(5.70, 5.00, 1.20, "/proj")
+	if d.Allow {
+		t.Fatal("DenyDecision must return Allow=false")
+	}
+	if d.Reason == "" {
+		t.Fatal("DenyDecision must return a non-empty Reason")
+	}
+	if d.SuggestedCmd != "fuse cap +5" {
+		t.Fatalf("SuggestedCmd: got %q want %q", d.SuggestedCmd, "fuse cap +5")
+	}
+	if d.CapUSD != 5.00 || d.EstimateUSD != 1.20 || d.CurrentUSD != 4.50 {
+		t.Fatalf("Decision fields wrong: %+v", d)
+	}
+	// Headline guarantee: even when projected <= cap (a TOCTOU edge where a
+	// reservation committed between the deny and the reason format), the reason
+	// is STILL non-empty. The defect was an empty 402 message, not a
+	// slightly-stale projected number.
+	d2 := DenyDecision(4.00, 5.00, 1.00, "/proj")
+	if d2.Allow || d2.Reason == "" || d2.SuggestedCmd == "" {
+		t.Fatalf("DenyDecision must be non-empty even when projected<=cap: %+v", d2)
+	}
+}

@@ -82,8 +82,12 @@ func deepseekHandler(s *Server) http.Handler {
 			return
 		}
 		if !allowed {
-			total, _ := s.led.WindowedTotal(s.projectRoot, s.cfg.Window)
-			decision := budget.Decide(total.USD, s.cfg.CapUSD, estimate, s.projectRoot)
+			// v0.7: fix-concurrent-deny-empty-reason — format the deny reason
+			// from the projected total (persisted+reserved+estimate) the ledger
+			// already denied on, not a persisted-only WindowedTotal via Decide
+			// (which returns an empty Reason whenever reserved>0 drives the deny).
+			_, _, projected, _ := s.led.ProjectedTotal(s.projectRoot, s.cfg.Window, estimate)
+			decision := budget.DenyDecision(projected, s.cfg.CapUSD, estimate, s.projectRoot)
 			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
 				decision.Reason, decision.SuggestedCmd)
 			writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)

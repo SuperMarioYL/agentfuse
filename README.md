@@ -158,7 +158,7 @@ A `.fuse.toml` at your project root. AgentFuse walks up from `cwd` to find the n
 | Key            | Type      | Default        | Meaning                                                                 |
 | -------------- | --------- | -------------- | ----------------------------------------------------------------------- |
 | `cap_usd`      | `float`   | *required*     | Hard cap in USD. Pre-flight estimates count toward this — single oversized requests cannot sneak in under the line. |
-| `window`       | `string`  | `"project"`    | `"project"` (cumulative since `fuse init`) or `"daily"` (rolls at midnight UTC). |
+| `window`       | `string`  | `"project"`    | `"project"` (cumulative since `fuse init`) or `"daily"` (rolls over at LOCAL midnight). |
 | `account`      | `string`  | `""`           | Named account from `~/.fuse/accounts.toml`. When set, AgentFuse refuses inbound keys that don't match this account's fingerprint and injects the right one, overriding stray `.env` keys. |
 | `provider`     | `string`  | `"anthropic"`  | One of `"anthropic"`, `"openai"`, `"gemini"`, `"deepseek"`, `"openai_compat"`. New in v0.2. |
 | `upstream_url` | `string`  | provider default | Override the upstream host. **Required** for `provider = "openai_compat"`. Optional for the others (e.g. point Gemini at Vertex AI). |

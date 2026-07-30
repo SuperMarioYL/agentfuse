@@ -2,5 +2,5 @@
 # AgentFuse walks up from cwd to find the nearest one.
 
 cap_usd = 5.0          # hard cap; pre-flight estimates count toward this
-window  = "project"    # "project" (cumulative) or "daily" (rolls over midnight UTC)
+window  = "project"    # "project" (cumulative) or "daily" (rolls over at LOCAL midnight)
 account = "personal"   # named account in ~/.fuse/accounts.toml

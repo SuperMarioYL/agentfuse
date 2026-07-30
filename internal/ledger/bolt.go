@@ -30,6 +30,12 @@ type Ledger struct {
 	// no longer all read the same under-cap total and collectively overshoot the
 	// cap. Keyed by project root.
 	reserved map[string]float64
+	// nowFunc returns the current time. It defaults to time.Now so production
+	// is unaffected; same-package tests override it (via setNow) to make
+	// day-boundary behavior deterministic without depending on the wall clock
+	// or the host timezone. All "today" lookups (addLocked / todayLocked) go
+	// through nowFunc so the bucket key is consistent with the injected clock.
+	nowFunc func() time.Time
 }
 
 var bucketName = []byte("ledger")
@@ -61,7 +67,7 @@ func Open(path string) (*Ledger, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Ledger{db: db, reserved: map[string]float64{}}, nil
+	return &Ledger{db: db, reserved: map[string]float64{}, nowFunc: time.Now}, nil
 }
 
 // Close the underlying bolt db.
@@ -73,7 +79,17 @@ func (l *Ledger) Close() error {
 }
 
 func key(project string, day time.Time) []byte {
-	return []byte(day.UTC().Format("2006-01-02") + "|" + project)
+	// v0.7: fix-daily-window-utc-reset. Format the day in the process (user)
+	// local timezone, NOT UTC. This is a per-user local proxy (`fuse run`
+	// launches the agent as a child on the user's own machine), so the process
+	// timezone IS the user's timezone. The previous day.UTC().Format(...) keyed
+	// the daily bucket on the UTC date, so a window="daily" cap reset at UTC
+	// midnight (e.g. 16:00 local in PST, 01:00 local in CET) rather than at the
+	// user's local midnight — a broken-promise for the documented daily cap —
+	// and made `fuse status`'s "today:" line report the UTC day's spend. The
+	// passed time already carries the process timezone (time.Now() or an
+	// injected test clock), so formatting it directly yields the local date.
+	return []byte(day.Format("2006-01-02") + "|" + project)
 }
 
 func dayKey(project, day string) []byte {
@@ -89,7 +105,7 @@ func (l *Ledger) Add(project string, tokensIn, tokensOut int, usd float64) (Entr
 
 // addLocked is Add without taking the lock. Caller MUST hold l.mu.
 func (l *Ledger) addLocked(project string, tokensIn, tokensOut int, usd float64) (Entry, error) {
-	k := key(project, time.Now())
+	k := key(project, l.nowFunc())
 	var out Entry
 	err := l.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketName)
@@ -122,7 +138,7 @@ func (l *Ledger) Today(project string) (Entry, error) {
 // todayLocked returns today's persisted entry for project (or zero if none).
 // Caller MUST hold l.mu.
 func (l *Ledger) todayLocked(project string) (Entry, error) {
-	k := key(project, time.Now())
+	k := key(project, l.nowFunc())
 	var out Entry
 	err := l.db.View(func(tx *bolt.Tx) error {
 		raw := tx.Bucket(bucketName).Get(k)
@@ -170,10 +186,12 @@ func (l *Ledger) projectTotalLocked(project string) (Entry, error) {
 // WindowedTotal returns the spend base for the cap check according to window:
 // "daily" => only today's persisted entry; "project"/""/default => every
 // persisted day for the project. It does NOT include in-flight reservations.
-// Handlers use it for the !allowed Decide reason so the projected spend shown
-// to the user matches the window ReserveWindowed actually enforced. Before
-// v0.6.0 the handlers always used ProjectTotal, so a window="daily" cap was
-// reported and enforced as a lifetime project cap (over-deny from day 2).
+// Before v0.6.0 the handlers always used ProjectTotal, so a window="daily"
+// cap was reported and enforced as a lifetime project cap (over-deny from
+// day 2). v0.7.0 moved the !allowed deny-reason plumbing off WindowedTotal
+// (persisted-only) onto ProjectedTotal (persisted+reserved+estimate) so a
+// concurrent deny carries a non-empty reason; WindowedTotal is retained for
+// callers that want the persisted-only windowed base (e.g. status reporting).
 func (l *Ledger) WindowedTotal(project, window string) (Entry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -188,6 +206,45 @@ func (l *Ledger) windowedTotalLocked(project, window string) (Entry, error) {
 		return l.todayLocked(project)
 	}
 	return l.projectTotalLocked(project)
+}
+
+// ProjectedTotal returns the spend base ReserveWindowed denies on for a
+// (project, window) + per-request estimate: the windowed persisted total
+// (persisted), the in-flight reservations currently held for the project
+// (reserved), and their sum plus estimateUSD (projected = persisted + reserved
+// + estimate). Handlers call it from the !allowed branch to format a deny
+// reason that reflects the in-flight reservations that actually tripped the
+// cap.
+//
+// v0.7: fix-concurrent-deny-empty-reason. Previously the !allowed branch
+// recomputed the deny reason from a persisted-only WindowedTotal fed into
+// budget.Decide. Whenever the deny was driven by in-flight reservations rather
+// than persisted spend alone — i.e. persisted + estimate <= cap but persisted
+// + reserved + estimate > cap, which requires reserved > 0 — Decide returned
+// Allow=true with an EMPTY Reason and SuggestedCmd, so the 402 body + stderr
+// line carried an empty message. ProjectedTotal exposes the reserved figure so
+// the projected total can format a non-empty reason. Best-effort: it re-reads
+// under the lock, so a reservation that commits between ReserveWindowed's deny
+// and this call can lower projected (the deny already happened; this only
+// affects the diagnostic number, never the deny decision itself).
+func (l *Ledger) ProjectedTotal(project, window string, estimateUSD float64) (persisted, reserved, projected float64, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	tot, err := l.windowedTotalLocked(project, window)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	res := l.reserved[project]
+	return tot.USD, res, tot.USD + res + estimateUSD, nil
+}
+
+// setNow replaces the ledger's clock for deterministic day-boundary tests.
+// Caller MUST call the returned restore func (typically deferred) to put the
+// production time.Now back. Same-package only.
+func (l *Ledger) setNow(t time.Time) (restore func()) {
+	prev := l.nowFunc
+	l.nowFunc = func() time.Time { return t }
+	return func() { l.nowFunc = prev }
 }
 
 // Reserve atomically performs the check-then-spend decision: under one lock it

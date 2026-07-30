@@ -28,23 +28,23 @@ type Price struct {
 // estimate is conservative — the kill-switch should deny rather than slip.
 var Prices = map[string]Price{
 	// Anthropic
-	"claude-3-5-sonnet":   {InputPer1M: 3.00, OutputPer1M: 15.00},
-	"claude-3-5-haiku":    {InputPer1M: 0.80, OutputPer1M: 4.00},
-	"claude-3-7-sonnet":   {InputPer1M: 3.00, OutputPer1M: 15.00},
-	"claude-sonnet-4":     {InputPer1M: 3.00, OutputPer1M: 15.00},
-	"claude-sonnet-4-5":   {InputPer1M: 3.00, OutputPer1M: 15.00},
-	"claude-opus-4":       {InputPer1M: 15.00, OutputPer1M: 75.00},
-	"claude-opus-4-1":     {InputPer1M: 15.00, OutputPer1M: 75.00},
-	"claude-haiku-4-5":    {InputPer1M: 1.00, OutputPer1M: 5.00},
+	"claude-3-5-sonnet": {InputPer1M: 3.00, OutputPer1M: 15.00},
+	"claude-3-5-haiku":  {InputPer1M: 0.80, OutputPer1M: 4.00},
+	"claude-3-7-sonnet": {InputPer1M: 3.00, OutputPer1M: 15.00},
+	"claude-sonnet-4":   {InputPer1M: 3.00, OutputPer1M: 15.00},
+	"claude-sonnet-4-5": {InputPer1M: 3.00, OutputPer1M: 15.00},
+	"claude-opus-4":     {InputPer1M: 15.00, OutputPer1M: 75.00},
+	"claude-opus-4-1":   {InputPer1M: 15.00, OutputPer1M: 75.00},
+	"claude-haiku-4-5":  {InputPer1M: 1.00, OutputPer1M: 5.00},
 	// OpenAI
-	"gpt-4o":          {InputPer1M: 2.50, OutputPer1M: 10.00},
-	"gpt-4o-mini":     {InputPer1M: 0.15, OutputPer1M: 0.60},
-	"gpt-4-turbo":     {InputPer1M: 10.00, OutputPer1M: 30.00},
-	"gpt-4.1":         {InputPer1M: 2.00, OutputPer1M: 8.00},
-	"gpt-5":           {InputPer1M: 5.00, OutputPer1M: 15.00},
-	"o3":              {InputPer1M: 2.00, OutputPer1M: 8.00},
-	"o3-mini":         {InputPer1M: 1.10, OutputPer1M: 4.40},
-	"gpt-3.5-turbo":   {InputPer1M: 0.50, OutputPer1M: 1.50},
+	"gpt-4o":        {InputPer1M: 2.50, OutputPer1M: 10.00},
+	"gpt-4o-mini":   {InputPer1M: 0.15, OutputPer1M: 0.60},
+	"gpt-4-turbo":   {InputPer1M: 10.00, OutputPer1M: 30.00},
+	"gpt-4.1":       {InputPer1M: 2.00, OutputPer1M: 8.00},
+	"gpt-5":         {InputPer1M: 5.00, OutputPer1M: 15.00},
+	"o3":            {InputPer1M: 2.00, OutputPer1M: 8.00},
+	"o3-mini":       {InputPer1M: 1.10, OutputPer1M: 4.40},
+	"gpt-3.5-turbo": {InputPer1M: 0.50, OutputPer1M: 1.50},
 }
 
 // fallback used when model name is unknown — picks a mid-tier price so we err
@@ -178,5 +178,36 @@ func Decide(currentUSD, capUSD, estimateUSD float64, projectRoot string) Decisio
 		return d
 	}
 	d.Allow = true
+	return d
+}
+
+// DenyDecision formats a deny Decision from a projected total that already
+// exceeds the cap. It is the !allowed-branch counterpart to Decide.
+//
+// v0.7: fix-concurrent-deny-empty-reason. The handlers' !allowed branch
+// previously recomputed the deny reason from a persisted-only ledger total via
+// Decide. ReserveWindowed denies when persisted + reserved[project] + estimate
+// > cap, but whenever the deny is driven by in-flight reservations rather than
+// persisted spend alone — i.e. persisted + estimate <= cap but persisted +
+// reserved + estimate > cap, which requires reserved > 0 — Decide sees
+// currentUSD + estimate <= cap and returns Allow=true with an EMPTY Reason
+// and SuggestedCmd. The handler then wrote an HTTP 402 whose body was
+// `{"error":{"type":"agentfuse_budget_denied","message":""}}` with no
+// suggested_command and printed an empty remediation line to stderr. The cap
+// still fired (fail-closed held), but the user/agent CLI got a deny with no
+// explanation. DenyDecision is called only after the ledger has already
+// decided to deny, so it never consults Allow and always returns a non-empty
+// Reason and SuggestedCmd. Pass the projected total (persisted + reserved +
+// estimate) ReserveWindowed denied on, retrieved via Ledger.ProjectedTotal.
+func DenyDecision(projectedUSD, capUSD, estimateUSD float64, projectRoot string) Decision {
+	d := Decision{
+		Allow:       false,
+		CurrentUSD:  projectedUSD - estimateUSD,
+		CapUSD:      capUSD,
+		EstimateUSD: estimateUSD,
+	}
+	d.Reason = fmt.Sprintf("budget exceeded for project %s ($%.2f / $%.2f)",
+		projectRoot, projectedUSD, capUSD)
+	d.SuggestedCmd = "fuse cap +5"
 	return d
 }
