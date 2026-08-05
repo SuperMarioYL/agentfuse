@@ -48,6 +48,19 @@ func runStatus(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	// v0.8: fix-status-daily-window-remaining — the enforced cap base is the
+	// WINDOWED total (today-only for window="daily", lifetime for
+	// window="project"/""), not the lifetime ProjectTotal. Previously remaining
+	// and the "cap reached" line used the lifetime sum, so a daily-cap project
+	// whose lifetime spend exceeded the (smaller) daily cap falsely reported
+	// "cap reached / remaining $0" from day 2 onward even though the daily
+	// window had reset at local midnight and the next request would be allowed
+	// (ReserveWindowed only counts today's persisted entry for window="daily").
+	// The lifetime `project:` line below stays as informational output.
+	windowed, err := led.WindowedTotal(projectRoot, cfg.Window)
+	if err != nil {
+		return err
+	}
 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "project:  %s\n", projectRoot)
@@ -58,12 +71,12 @@ func runStatus(cmd *cobra.Command) error {
 		today.USD, today.Requests, today.TokensIn, today.TokensOut)
 	fmt.Fprintf(out, "project:  $%.4f  (%d req)\n", total.USD, total.Requests)
 
-	remaining := cfg.CapUSD - total.USD
+	remaining := cfg.CapUSD - windowed.USD
 	if remaining < 0 {
 		remaining = 0
 	}
 	fmt.Fprintf(out, "remaining: $%.4f\n", remaining)
-	if total.USD >= cfg.CapUSD {
+	if windowed.USD >= cfg.CapUSD {
 		fmt.Fprintf(cmd.ErrOrStderr(), "agentfuse: cap reached — next request will be denied\n")
 	}
 	return nil

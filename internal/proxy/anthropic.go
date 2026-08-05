@@ -105,7 +105,16 @@ func anthropicHandler(s *Server) http.Handler {
 		}()
 
 		// 4. Forward upstream.
-		upstreamURL, err := url.Parse(AnthropicUpstream + r.URL.RequestURI())
+		// v0.8: fix-upstream-url-ignored-anthropic-openai — honor cfg.UpstreamURL
+		// (a corporate gateway / Azure-OpenAI endpoint / self-hosted relay) the
+		// same way deepseek/gemini/openai_compat already do, instead of always
+		// hitting the package-level AnthropicUpstream default and silently
+		// bypassing the configured gateway.
+		upstreamBase := AnthropicUpstream
+		if s.cfg.UpstreamURL != "" {
+			upstreamBase = strings.TrimRight(s.cfg.UpstreamURL, "/")
+		}
+		upstreamURL, err := url.Parse(upstreamBase + r.URL.RequestURI())
 		if err != nil {
 			writeFuseError(w, http.StatusBadGateway, "parse upstream url: "+err.Error(), "")
 			return
