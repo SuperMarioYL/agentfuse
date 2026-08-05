@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "content_version": "v0.5.0",
+  "content_version": "v0.8.0",
   "name": "agentfuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
@@ -16,8 +16,8 @@
       "en": "A hard cap on what your coding agent can spend\n— it stops at the line, before the next request leaves"
     },
     "sub": {
-      "zh": "在项目根目录放一个 .fuse.toml，写上这项目最多花几美元。你的 claude、codex、aider 跑过夜循环时，累计花费一到上限就停——下一条请求直接在本机被挡回。不挂后台、不上云、不回传任何数据。一个会偷偷回传数据的熔断器，本身就是问题。",
-      "en": "Drop a .fuse.toml at your project root with a USD cap. When your claude, codex, or aider runs an overnight loop, the moment cumulative spend hits the cap it stops — the next request is turned back at your machine. No background process, no cloud, nothing phoned home. A kill-switch that phones home is itself the problem."
+      "zh": "在项目根目录放一个 .fuse.toml，写上这项目最多花几美元——或每天最多花多少。你的 claude、codex、aider 跑过夜循环时，累计花费一到上限就停，下一条请求直接在本机被挡回。想把它指向你自己的上游网关也行，上限照常守住。不挂后台、不上云、不回传任何数据。一个会偷偷回传数据的熔断器，本身就是问题。",
+      "en": "Drop a .fuse.toml at your project root with a USD cap — per project, or per day. When your claude, codex, or aider runs an overnight loop, the moment cumulative spend hits the cap it stops — the next request is turned back at your machine. Point it at your own upstream gateway if you like; the cap still holds. No background process, no cloud, nothing phoned home. A kill-switch that phones home is itself the problem."
     },
     "command": "fuse run claude",
     "cta": { "zh": "开始使用", "en": "Get started" },
@@ -27,27 +27,29 @@
     {
       "title": { "zh": "到顶就停，并发也冲不过上限", "en": "Stops at the cap — even under concurrent load" },
       "body": {
-        "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。以前有一类请求能让花费悄悄绕过上限，现在每一条都照算、照挡。没有“差一点没卡住”这种事。",
-        "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. A kind of request that once let spend slip quietly past the cap is now counted and held like every other. There's no 'almost held' here."
+        "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。被挡回的那条会告诉你为什么、该怎么办，不再是一句空话。想要按天设上限？到你的本地午夜自动清零，不是 UTC 零点。没有“差一点没卡住”这种事。",
+        "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. The denied request tells you why and what to do — not a blank line. Want a per-day cap? It auto-resets at YOUR local midnight, not UTC midnight. There's no 'almost held' here."
       },
       "chips": [
         "› 每条请求出门前核对",
         "› 到顶即挡回",
         "› 并发也守得住",
-        "› 没有一种请求能绕过上限"
+        "› 挡回的那条会告诉你为什么",
+        "› 按天上限到本地午夜清零"
       ]
     },
     {
-      "title": { "zh": "不管你用哪家的模型，上限都一样", "en": "Same cap, whichever model you run" },
+      "title": { "zh": "不管你用哪家的模型、指向哪个上游，上限都一样", "en": "Same cap, whichever model — and whichever upstream you point it at" },
       "body": {
-        "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务。流式回复漏报花费时，agentfuse 在本地把花费补回来——绝不悄悄记一笔 $0，让上限形同虚设。这条本地估算是逐条校准过的：不管回复是流式吐出来的还是一次性返回的，估出来的花费都经得起对账。",
-        "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured. And when a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0 and lets the cap drift. That local estimate is calibrated reply by reply: whether a response streams or comes back in one piece, the figured cost stands up to a recount."
+        "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务，也管住你把它指向的任何自定义上游——你的网关、你的区域端点。流式回复漏报花费时，agentfuse 在本地把花费补回来，绝不悄悄记一笔 $0。流式回复的每一种形状现在都照算：再没有一种流式能让花费悄悄绕过上限。一个挂起的上游也不会把你的额度占住不放——几分钟内自动退还，上限不被一条卡住的请求拖垮。",
+        "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured, and across any custom upstream you point it at: your gateway, your regional endpoint. When a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0. Every shape of streamed reply is now counted: no streamed shape can quietly slip past the cap. And a stalled upstream won't hold your budget hostage — the reservation releases within minutes, so one hung request can't drag the cap down."
       },
       "chips": [
         "› 一份配置管所有模型服务",
-        "› 漏报花费本地补回",
-        "› 绝不记一笔 $0",
-        "› 估算逐条经得起对账"
+        "› 可指向你自己的上游",
+        "› 漏报花费本地补回，绝不记 $0",
+        "› 流式回复每一种形状都照算",
+        "› 上游卡住不锁死额度"
       ]
     },
     {
@@ -85,8 +87,8 @@
       "en": "One .fuse.toml, one cap per project"
     },
     "sub": {
-      "zh": "开源、MIT、无付费墙。在你本机给 Agent 设上限这件事，永不收费。",
-      "en": "Open source, MIT, no paywall. The act of capping your agent locally is never gated."
+      "zh": "开源、Apache-2.0、无付费墙。在你本机给 Agent 设上限这件事，永不收费。",
+      "en": "Open source, Apache-2.0, no paywall. The act of capping your agent locally is never gated."
     },
     "button": { "zh": "在 GitHub 上开始", "en": "Get started on GitHub" }
   },
