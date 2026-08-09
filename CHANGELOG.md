@@ -6,6 +6,45 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-09
+
+A fix-only release anchored on two code-grounded bug-hunter findings. No
+net-new feature scope: `gh_issues` is empty (0 open, 0 ever filed) and traction
+is unchanged since v0.8.0 (2 stars / 0 forks / 0 open issues / 0 subscribers),
+so the v0.8.0 out-of-scope gate carries forward. Based on
+`mvp_plan_v0.7.0.md` (no `mvp_plan_v0.8.0.md` exists for this scan); the
+regression-floor guard confirmed target v0.9.0 > shipped v0.8.0.
+
+### Fixed
+- **Account guard compared only a 12-char redaction prefix to decide key
+  equality** (`internal/account/guard.go`, fix-account-fingerprint-prefix-collision):
+  `FingerprintMatches` decided whether an inbound API key equaled the
+  configured managed account's stored key by comparing only the first
+  `FingerprintLen=12` characters. Real same-provider key formats share those
+  first 12 chars (Anthropic `sk-ant-api03-…`, OpenAI `sk-proj-…`), so two
+  DIFFERENT keys collided on the prefix and the guard believed a stray/personal
+  key already matched the managed account — forwarding it verbatim instead of
+  rewriting it with the managed key, defeating managed-account enforcement
+  (fail-open for account routing; the project spend cap still fired because the
+  ledger is project-keyed). `FingerprintMatches` now compares the FULL keys with
+  `crypto/subtle.ConstantTimeCompare` and requires equality; `Fingerprint()` is
+  kept exactly as-is for the redaction surface only. A regression test covers a
+  same-prefix/different-suffix key pair that must not match.
+- **Unknown `window` values silently enforced a lifetime cap**
+  (`internal/budget/config.go`, fix-window-value-unvalidated): `config.Load`
+  accepted ANY string for `window` — it defaulted `""` to `"project"` but
+  performed no validation, and the ledger treats only the literal `"daily"` as
+  today-only, falling every other value through to the lifetime project total.
+  A typo like `daly` / `week` / `monthly` therefore silently enforced a lifetime
+  cap with no error (over-deny from day 2 onward — the opposite of the v0.6/v0.8
+  window fixes' intent). `Load` now validates `window ∈ {"daily","project"}`
+  after the `"" -> "project"` default and returns a clear error
+  (`window must be "daily" or "project" (got %q)`) for any other value so a typo
+  fails at config load rather than silently as a wrong cap. No ledger change was
+  needed (it already treats only `"daily"` specially). A regression test asserts
+  an invalid window value returns an error and that `"daily"`/`"project"` still
+  load.
+
 ## [0.6.0] — 2026-07-27
 
 A quiet cap-correctness/availability release. v0.5.0 closed the gzip

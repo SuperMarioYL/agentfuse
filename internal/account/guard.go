@@ -1,6 +1,7 @@
 package account
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -76,8 +77,16 @@ func Fingerprint(key string) string {
 	return key[:FingerprintLen]
 }
 
-// FingerprintMatches reports whether the inbound key's prefix matches the named
-// account's stored key prefix. Empty inbound returns false.
+// FingerprintMatches reports whether the inbound key equals the named
+// account's stored key, compared in constant time. Empty inbound or stored
+// keys return false.
+//
+// Equality is decided on the FULL keys, not the FingerprintLen=12 prefix:
+// real same-provider key formats share their first 12 chars (e.g. Anthropic
+// sk-ant-api03-…, OpenAI sk-proj-…), so a prefix compare would treat two
+// different keys as the same and forward a stray personal key verbatim
+// instead of rewriting it with the managed account's key (a fail-open for
+// account routing). Fingerprint() is kept as the redaction surface only.
 func (f *File) FingerprintMatches(name, inboundKey string) bool {
 	a, err := f.Lookup(name)
 	if err != nil {
@@ -86,5 +95,5 @@ func (f *File) FingerprintMatches(name, inboundKey string) bool {
 	if inboundKey == "" || a.APIKey == "" {
 		return false
 	}
-	return Fingerprint(a.APIKey) == Fingerprint(inboundKey)
+	return subtle.ConstantTimeCompare([]byte(a.APIKey), []byte(inboundKey)) == 1
 }

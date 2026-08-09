@@ -55,6 +55,9 @@ func Load(projectRoot string) (*Config, error) {
 	if cfg.Window == "" {
 		cfg.Window = "project"
 	}
+	if cfg.Window != "daily" && cfg.Window != "project" {
+		return nil, fmt.Errorf(`window must be "daily" or "project" (got %q)`, cfg.Window)
+	}
 	if cfg.Provider == "" {
 		cfg.Provider = "anthropic"
 	}
