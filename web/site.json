@@ -1,11 +1,16 @@
 {
   "schema": 1,
-  "content_version": "v0.8.0",
+  "content_version": "v0.9.0",
   "name": "agentfuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
-  "lang": { "primary": "zh", "toggle": true },
-  "accent": ["#F59E0B"],
+  "lang": {
+    "primary": "zh",
+    "toggle": true
+  },
+  "accent": [
+    "#F59E0B"
+  ],
   "hero": {
     "eyebrow": {
       "zh": "到顶即停 · 请求不出本机 · 不挂后台 · 不回传数据",
@@ -20,12 +25,21 @@
       "en": "Drop a .fuse.toml at your project root with a USD cap — per project, or per day. When your claude, codex, or aider runs an overnight loop, the moment cumulative spend hits the cap it stops — the next request is turned back at your machine. Point it at your own upstream gateway if you like; the cap still holds. No background process, no cloud, nothing phoned home. A kill-switch that phones home is itself the problem."
     },
     "command": "fuse run claude",
-    "cta": { "zh": "开始使用", "en": "Get started" },
-    "ctaGithub": { "zh": "在 GitHub 查看", "en": "View on GitHub" }
+    "cta": {
+      "zh": "开始使用",
+      "en": "Get started"
+    },
+    "ctaGithub": {
+      "zh": "在 GitHub 查看",
+      "en": "View on GitHub"
+    }
   },
   "advantages": [
     {
-      "title": { "zh": "到顶就停，并发也冲不过上限", "en": "Stops at the cap — even under concurrent load" },
+      "title": {
+        "zh": "到顶就停，并发也冲不过上限",
+        "en": "Stops at the cap — even under concurrent load"
+      },
       "body": {
         "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。被挡回的那条会告诉你为什么、该怎么办，不再是一句空话。想要按天设上限？到你的本地午夜自动清零，不是 UTC 零点。没有“差一点没卡住”这种事。",
         "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. The denied request tells you why and what to do — not a blank line. Want a per-day cap? It auto-resets at YOUR local midnight, not UTC midnight. There's no 'almost held' here."
@@ -39,7 +53,10 @@
       ]
     },
     {
-      "title": { "zh": "不管你用哪家的模型、指向哪个上游，上限都一样", "en": "Same cap, whichever model — and whichever upstream you point it at" },
+      "title": {
+        "zh": "不管你用哪家的模型、指向哪个上游，上限都一样",
+        "en": "Same cap, whichever model — and whichever upstream you point it at"
+      },
       "body": {
         "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务，也管住你把它指向的任何自定义上游——你的网关、你的区域端点。流式回复漏报花费时，agentfuse 在本地把花费补回来，绝不悄悄记一笔 $0。流式回复的每一种形状现在都照算：再没有一种流式能让花费悄悄绕过上限。一个挂起的上游也不会把你的额度占住不放——几分钟内自动退还，上限不被一条卡住的请求拖垮。",
         "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured, and across any custom upstream you point it at: your gateway, your regional endpoint. When a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0. Every shape of streamed reply is now counted: no streamed shape can quietly slip past the cap. And a stalled upstream won't hold your budget hostage — the reservation releases within minutes, so one hung request can't drag the cap down."
@@ -53,7 +70,10 @@
       ]
     },
     {
-      "title": { "zh": "价格表在你本机，从不联网", "en": "Prices live on your machine, never fetched" },
+      "title": {
+        "zh": "价格表在你本机，从不联网",
+        "en": "Prices live on your machine, never fetched"
+      },
       "body": {
         "zh": "模型价格内置在工具里，你可以按机器覆盖。agentfuse 从不联网取价——这是它能当熔断器的前提。fuse prices --diff 还会告诉你：你的本地覆盖里，哪些压住了已变动的默认值，哪些指向已经下架的模型。",
         "en": "Model prices ship inside the tool; you override them per machine. agentfuse never fetches a price over the network — that's the premise for a tool allowed to cut off your spend. fuse prices --diff shows which of your overrides shadow a default that has since moved, and which point at a model that has since been retired."
@@ -65,7 +85,10 @@
       ]
     },
     {
-      "title": { "zh": "全部留在本机，三十秒能审完", "en": "Everything stays local — auditable in 30 seconds" },
+      "title": {
+        "zh": "全部留在本机，三十秒能审完",
+        "en": "Everything stays local — auditable in 30 seconds"
+      },
       "body": {
         "zh": "花费只写在你本机的一个文件里，工具随你那条 Agent 命令一起退出，不挂后台。除了你配的那家模型服务，它不和任何东西通信。三十秒就能审完它会不会回传数据——一个会偷偷回传的熔断器，本身就是信任问题。",
         "en": "Spend is written to a single file on your machine; the tool exits with the agent command it wrapped — nothing lingers in the background. It talks to nothing but the model service you configured. You can audit in thirty seconds whether it phones anything home — a kill-switch that phones home is itself the trust problem."
@@ -79,7 +102,12 @@
   ],
   "scene": {
     "kind": "hub-nodes",
-    "nodes": ["Overnight loop", "Wrong account", "Budget drain", "Untracked spend"]
+    "nodes": [
+      "Overnight loop",
+      "Wrong account",
+      "Budget drain",
+      "Untracked spend"
+    ]
   },
   "cta": {
     "headline": {
@@ -90,7 +118,10 @@
       "zh": "开源、Apache-2.0、无付费墙。在你本机给 Agent 设上限这件事，永不收费。",
       "en": "Open source, Apache-2.0, no paywall. The act of capping your agent locally is never gated."
     },
-    "button": { "zh": "在 GitHub 上开始", "en": "Get started on GitHub" }
+    "button": {
+      "zh": "在 GitHub 上开始",
+      "en": "Get started on GitHub"
+    }
   },
   "footer": {
     "tag": {
