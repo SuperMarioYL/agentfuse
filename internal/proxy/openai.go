@@ -152,23 +152,33 @@ func openaiHandler(s *Server) http.Handler {
 			if model == "" {
 				model = req.Model
 			}
-			if inTok == 0 && outTok == 0 {
+			// Record the accuracy sample only when BOTH sides are reported by the
+			// upstream usage (the both-present branch) — the §8 >25% criterion
+			// measures the local estimator against the real usage, which is
+			// meaningless once a side has fallen back to a local estimate below.
+			// v0.4: feed EstimateCompletion (the estimator the fallback bills with,
+			// incl. the +100 round-up) on the completion text.
+			// v0.5.0: guard on completionText != "" so an empty completion does not
+			// record EstimateCompletion(model, "")=100 and false-trigger the kill
+			// criterion.
+			if inTok > 0 && outTok > 0 && completionText != "" {
+				tokens.RecordSample("openai", model,
+					tokens.EstimateCompletion(model, completionText), outTok)
+			}
+			// v0.10: fix-anthropic-openai-partial-usage-bothzero-fallback — fall
+			// back per-side, not on a both-zero guard. A Chat Completions stream
+			// whose final usage frame is dropped by a relay closing mid-stream
+			// (clean TCP FIN, partial bytes, err=nil, status 200) leaves one side
+			// at 0 while the delta frames still accumulated completion text. The
+			// both-zero guard skipped the fallback in that partial case and billed
+			// the missing side as 0 tokens ($0) — fail-open. Estimate each missing
+			// side independently, mirroring deepseek.go:143-148 /
+			// openai_compat.go:132-141 / gemini.go:163-168.
+			if inTok == 0 {
 				inTok = tokens.EstimatePrompt(model, promptText)
+			}
+			if outTok == 0 {
 				outTok = tokens.EstimateCompletion(model, completionText)
-			} else {
-				// v0.4: measure EstimateCompletion (the estimator the fallback bills
-				// with, incl. +100 round-up) on the completion text — previously
-				// EstimatePrompt(completionText) compared against outTok, which is
-				// the wrong side + structurally biased low (no round-up).
-				// v0.5.0: guard — skip the sample when completionText is still "".
-				// An empty completion yields EstimateCompletion(model,"")=100
-				// (roundUp n<=0 -> step), which false-triggers the §8 >25% kill
-				// criterion the harness was built to make evaluable. There is
-				// nothing meaningful to compare against outTok in that case.
-				if completionText != "" {
-					tokens.RecordSample("openai", model,
-						tokens.EstimateCompletion(model, completionText), outTok)
-				}
 			}
 			usd := budget.CostFromUsageWithProvider("openai", model, inTok, outTok)
 			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {

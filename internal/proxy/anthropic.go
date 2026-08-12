@@ -152,27 +152,37 @@ func anthropicHandler(s *Server) http.Handler {
 			if model == "" {
 				model = req.Model
 			}
-			if inTok == 0 && outTok == 0 {
-				// No usage anywhere (truncated/odd stream) — re-tokenize locally so
-				// the ledger still moves and the kill-switch still fires.
+			// Record the accuracy sample only when BOTH sides are reported by the
+			// upstream usage (the both-present branch) — the §8 >25% criterion
+			// measures the local estimator against the real usage, which is
+			// meaningless once a side has fallen back to a local estimate below
+			// (comparing the estimator against itself).
+			// v0.4: feed EstimateCompletion (the estimator the fallback bills with,
+			// incl. the +100 round-up) on the completion text.
+			// v0.5.0: guard on completionText != "" so an empty completion does not
+			// record EstimateCompletion(model, "")=100 and false-trigger the kill
+			// criterion.
+			if inTok > 0 && outTok > 0 && completionText != "" {
+				tokens.RecordSample("anthropic", model,
+					tokens.EstimateCompletion(model, completionText), outTok)
+			}
+			// v0.10: fix-anthropic-openai-partial-usage-bothzero-fallback — fall
+			// back per-side, not on a both-zero guard. Anthropic streaming splits
+			// usage across events: message_start carries usage.input_tokens and the
+			// final message_delta carries usage.output_tokens. If a relay closes
+			// the connection cleanly mid-stream (a clean TCP FIN yields partial
+			// bytes with err=nil, and status was already 200 so the 2xx billing
+			// branch runs), message_delta is absent and parseAnthropicUsage returns
+			// inTok>0, outTok=0 with a non-empty completionText. The both-zero
+			// guard skipped the fallback in that case and billed outTok=0 ($0
+			// output) — fail-open: realized spend can exceed the cap without
+			// tripping it. Estimate each missing side independently, mirroring
+			// deepseek.go:143-148 / gemini.go:163-168 / openai_compat.go:132-141.
+			if inTok == 0 {
 				inTok = tokens.EstimatePrompt(model, promptText)
+			}
+			if outTok == 0 {
 				outTok = tokens.EstimateCompletion(model, completionText)
-			} else {
-				// Both upstream usage AND a local estimate are available — record
-				// the comparison so the §8 >25% accuracy criterion is measurable.
-				// v0.4: use EstimateCompletion (the estimator the fallback actually
-				// bills with, incl. +100 round-up) on the completion text — the
-				// harness must measure the estimator the cap uses, not EstimatePrompt
-				// run on completion text (wrong side + no round-up = biased-low).
-				// v0.5.0: guard — skip the sample when completionText is still "".
-				// An empty completion yields EstimateCompletion(model,"")=100
-				// (roundUp n<=0 -> step), which false-triggers the §8 >25% kill
-				// criterion the harness was built to make evaluable. There is
-				// nothing meaningful to compare against outTok in that case.
-				if completionText != "" {
-					tokens.RecordSample("anthropic", model,
-						tokens.EstimateCompletion(model, completionText), outTok)
-				}
 			}
 			usd := budget.CostFromUsageWithProvider("anthropic", model, inTok, outTok)
 			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {

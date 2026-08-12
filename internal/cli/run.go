@@ -102,6 +102,20 @@ func runWrapped(cmd *cobra.Command, args []string) error {
 		if a, err := accts.Lookup(cfg.Account); err == nil && a.APIKey != "" {
 			env = setEnv(env, "ANTHROPIC_API_KEY", a.APIKey)
 			env = setEnv(env, "OPENAI_API_KEY", a.APIKey)
+			// v0.10: fix-run-gemini-managed-account-key-not-injected — the gemini
+			// CLI / google-generativeai SDK reads its key from GEMINI_API_KEY or
+			// GOOGLE_API_KEY, not from the anthropic/openai knobs set above. With
+			// a clean environment the child had no key: it either errored
+			// client-side before reaching the proxy, or fell back to Application
+			// Default Credentials (Authorization: Bearer), which the gemini
+			// account guard (gemini.go:68-86) does not inspect — so the configured
+			// account's key was never used (broken managed-account promise for the
+			// gemini provider). Inject both so the child authenticates with the
+			// managed key and sends ?key=/x-goog-api-key the guard then verifies.
+			if cfg.Provider == "gemini" {
+				env = setEnv(env, "GEMINI_API_KEY", a.APIKey)
+				env = setEnv(env, "GOOGLE_API_KEY", a.APIKey)
+			}
 		}
 	}
 
