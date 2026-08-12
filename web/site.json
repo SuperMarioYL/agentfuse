@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "content_version": "v0.9.0",
+  "content_version": "v0.10.0",
   "name": "agentfuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
@@ -128,5 +128,13 @@
       "zh": "给编码 Agent 花费装的本地熔断器",
       "en": "The local kill-switch for coding-agent spend"
     }
-  }
+  },
+  "generated_at": "2026-08-12T19:47:05Z",
+  "changelog": [
+    {
+      "version": "v0.10.0",
+      "zh": "按侧 tiktoken 兜底现在也作用于 Anthropic 与 OpenAI 处理器，部分用量流不再会少计输出侧而让花费突破预算上限。托管账户密钥现在也会注入到 Gemini provider。",
+      "en": "The per-side tiktoken fallback now applies to the Anthropic and OpenAI handlers too, so a partial-usage stream can no longer under-bill the output side and let spend exceed the cap. The managed account key is now injected for the Gemini provider."
+    }
+  ]
 }
