@@ -62,7 +62,7 @@ func openaiHandler(s *Server) http.Handler {
 				if err != nil {
 					writeFuseError(w, http.StatusPreconditionFailed,
 						fmt.Sprintf("named account %q not found in accounts.toml", s.cfg.Account),
-						"fuse run --account <name> or edit ~/.fuse/accounts.toml")
+						"fuse init --account <name> or edit .fuse.toml's account field")
 					return
 				}
 				r.Header.Set("Authorization", "Bearer "+acc.APIKey)
@@ -147,7 +147,27 @@ func openaiHandler(s *Server) http.Handler {
 		// and the streamed shapes, and fall back to a local tiktoken estimate when
 		// no usage is present.
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			inTok, outTok, completionText, parsedModel := parseDeepSeekUsage(respBody)
+			// v0.11: fix-openai-responses-stream-misparse — the openai handler
+			// routes ALL /openai/* traffic through parseDeepSeekUsage, whose
+			// walker only extracts choices[].delta.content + a top-level usage
+			// block. The Responses API (POST /v1/responses, used by the Codex
+			// CLI for gpt-5/o3) carries text under a top-level `delta` string
+			// and final usage under response.usage.{input_tokens,output_tokens}
+			// — neither of which the Chat-Completions walker reads — so every
+			// streamed Responses request yielded in=0, out=0, completionText=""
+			// and fell back to billing 100 output tokens (fail-open). Branch to
+			// the Responses parser for /v1/responses so streamed Responses
+			// spend is billed from the real usage block.
+			var (
+				inTok, outTok  int
+				completionText string
+				parsedModel     string
+			)
+			if isOpenAIResponsesPath(r.URL.Path) {
+				inTok, outTok, completionText, parsedModel = parseOpenAIResponsesUsage(respBody)
+			} else {
+				inTok, outTok, completionText, parsedModel = parseDeepSeekUsage(respBody)
+			}
 			model := parsedModel
 			if model == "" {
 				model = req.Model

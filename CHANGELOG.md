@@ -6,6 +6,89 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-19
+
+A fix-only release closing the four findings from the v0.11 grill bug-hunt,
+each verified to a file:line. All four are cap-correctness / availability
+defects in the fail-open direction (the property this product exists to
+prevent), plus one CLI ergonomics bug that made `fuse run` unable to wrap the
+agents it exists to wrap. No net-new feature scope. The regression-floor guard
+confirmed target v0.11.0 > shipped v0.9.0 (`VERSION` was stale at 0.9.0; bumped
+to 0.11.0, and the dev-build `main.version` default aligned to match).
+
+### Fixed
+- **`fuse run` parsed every `--foo`/`-x` token after `run` as a fuse flag and
+  aborted "unknown flag" before the child spawned**
+  (`internal/cli/run.go`, fix-run-passthrough-flags-unknown): `NewRunCmd` set
+  `Args: cobra.MinimumNArgs(1)` and registered no flags but did NOT set
+  `DisableFlagParsing`, so cobra/pflag parsed each `--foo`/`-x` token after
+  `run` as a fuse flag and exited 1 before `exec.Command` ever ran —
+  `fuse run echo --foo`, `fuse run claude --model opus`, `fuse run codex
+  --resume` all failed to launch the agent. `NewRunCmd` now sets
+  `DisableFlagParsing: true`; the `Args` validator is replaced by an inline
+  `if len(args) < 1` guard in `RunE` that returns a clear, actionable error
+  (instead of panicking on `args[0]` in `exec.Command`). All tokens after
+  `run` are forwarded verbatim to `exec.Command(args[0], args[1:]...)`. Tests
+  assert `fuse run claude --model opus --resume --foo -x bar` reaches `RunE`
+  as `["claude","--model","opus","--resume","--foo","-x","bar"]`, that
+  `fuse run` with no command returns the clear error (not a panic), and a
+  structural guard that `DisableFlagParsing` stays set.
+- **`tiktoken.GetEncoding` opened an unbounded network connection during a
+  request** (`internal/tokens/tiktoken.go` + `internal/tokens/loader.go`,
+  fix-tiktoken-getencoding-network-call): `getEnc` called
+  `tiktoken.GetEncoding(name)`; tiktoken-go v0.1.7's default `BpeLoader` does
+  an `http.Get` to `https://openaipublic.blob.core.windows.net/encodings/<enc>.tiktoken`
+  when the on-disk cache is absent, and `http.DefaultClient` has `Timeout=0`,
+  so the call blocked indefinitely while a ledger reservation was held —
+  re-opening the v0.6 budget-starvation defect in air-gapped / corporate-gateway
+  environments. The package comment claimed "nothing here touches the network"
+  (false). **Approach taken: fully-offline embedded loader.** The two vocab
+  files actually selected by `encodingFor` (`cl100k_base` and `o200k_base`) are
+  fetched once at build/dev time via `curl` and committed under
+  `internal/tokens/data/`; a new `offlineBpeLoader` (registered via
+  `tiktoken.SetBpeLoader` at package `init()` using `//go:embed`) serves the
+  embedded bytes, so the per-request path never opens a network connection.
+  An encoding we do not ship (p50k_base/r50k_base/p50k_edit) returns an error
+  and callers fall back to the existing chars/4 estimate. Tests assert
+  `getEnc` returns in bounded time (no 15s+ hang), that an un-embedded
+  encoding errors instead of hitting the network, and that the embedded
+  encoder still tokenizes a known string.
+- **Streamed `/v1/responses` (OpenAI Responses API, Codex CLI for gpt-5/o3)
+  billed in=0, out=0 and fell back to the 100-output-token fail-open cap**
+  (`internal/proxy/openai.go` + `internal/proxy/responses.go`,
+  fix-openai-responses-stream-misparse): the openai handler routed ALL
+  `/openai/*` traffic — including `/v1/responses` — through
+  `parseDeepSeekUsage`, whose stream walker only extracts
+  `choices[].delta.content` text + a top-level `usage` block. A Responses-API
+  SSE stream carries text under a top-level `delta` string (on
+  `response.output_text.delta` frames) and final usage under
+  `response.usage.{input_tokens,output_tokens}` (on `response.completed`),
+  neither of which the walker reads — so every streamed Responses request
+  yielded in=0, out=0, completionText="" and fell back to billing 100 output
+  tokens. A new `parseOpenAIResponsesUsage` (mirroring
+  `parseAnthropicUsage`'s per-event accumulation) handles both the unary
+  Responses JSON object and the SSE event stream: it accumulates the `delta`
+  string from text-delta frames and takes the last non-zero
+  input/output counts from `response.usage`. The openai handler branches to
+  it for `/v1/responses` (and `/v1/responses/<id>`). Tests assert a sample
+  Responses SSE stream yields in=128/out=37, completionText="Hello world",
+  and that the handler bills the real usage block through the ledger instead
+  of the 100-token fallback.
+- **HTTP 412 (account-not-found) suggested the non-existent `fuse run
+  --account` flag** (`internal/proxy/anthropic.go`, `openai.go`,
+  `deepseek.go`, `gemini.go`, `openai_compat.go`,
+  fix-account-412-suggests-nonexistent-run-flag): when a named account was
+  configured in `.fuse.toml` but absent from `accounts.toml`, all five
+  handlers returned HTTP 412 with `suggested_command = "fuse run --account
+  <name> or edit ~/.fuse/accounts.toml"`. But `fuse run` registers no
+  `--account` flag (and after the fix above, `--account` would be forwarded
+  to the child), so the remediation sent users down a broken path. All five
+  handlers now suggest `"fuse init --account <name> or edit .fuse.toml's
+  account field"` — `fuse init --account` is a real flag, and the account is
+  an init-time / `.fuse.toml` setting. A table-driven test asserts all five
+  handlers return 412 with a `suggested_command` mentioning
+  `fuse init --account` and NOT `fuse run --account`.
+
 ## [0.9.0] — 2026-08-09
 
 A fix-only release anchored on two code-grounded bug-hunter findings. No

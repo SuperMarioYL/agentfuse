@@ -5,8 +5,15 @@
 // 10-15% over-estimate is fine — the kill-switch is supposed to err on the
 // side of refusing one extra request.
 //
-// The package keeps zero global state besides the encoding cache; nothing here
-// touches the network.
+// The package keeps zero global state besides the encoding cache. v0.11
+// (fix-tiktoken-getencoding-network-call): tiktoken-go's default BpeLoader
+// does an http.Get against openaipublic.blob.core.windows.net when its on-disk
+// cache is absent, and http.DefaultClient has Timeout=0 — an unbounded block
+// that re-opens the v0.6 budget-starvation defect while a ledger reservation
+// is held. init() in loader.go swaps in an offlineBpeLoader that serves the
+// two embedded vocab files (cl100k_base, o200k_base), so the per-request path
+// never opens a network connection. An encoding we don't ship errors out and
+// the estimator falls back to chars/4.
 package tokens
 
 import (
@@ -60,6 +67,10 @@ func getEnc(model string) (*tiktoken.Tiktoken, error) {
 
 	enc, err := tiktoken.GetEncoding(name)
 	if err != nil {
+		// Either an un-embedded encoding (offlineBpeLoader refused to touch the
+		// network) or a parse failure on the embedded vocab — callers fall back
+		// to chars/4 via fallbackCharsPerToken. The unbounded http.Get defect is
+		// gone: this path returns in bounded time.
 		return nil, err
 	}
 	cacheMu.Lock()

@@ -52,7 +52,7 @@ func deepseekHandler(s *Server) http.Handler {
 				if err != nil {
 					writeFuseError(w, http.StatusPreconditionFailed,
 						fmt.Sprintf("named account %q not found in accounts.toml", s.cfg.Account),
-						"fuse run --account <name> or edit ~/.fuse/accounts.toml")
+						"fuse init --account <name> or edit .fuse.toml's account field")
 					return
 				}
 				r.Header.Set("Authorization", "Bearer "+acc.APIKey)

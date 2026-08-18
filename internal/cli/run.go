@@ -18,12 +18,26 @@ import (
 )
 
 // NewRunCmd builds `fuse run <cmd> [args...]`.
+//
+// v0.11: fix-run-passthrough-flags-unknown — `run` registers no flags of its
+// own, so cobra/pflag parsed every `--foo`/`-x` token after `run` as a fuse
+// flag and aborted "unknown flag" before the child spawned (e.g. `fuse run
+// claude --model opus`, `fuse run codex --resume`, `fuse run echo --foo` all
+// exited 1 and never launched the agent). DisableFlagParsing makes cobra hand
+// us every token after `run` verbatim; the manual len check replaces the old
+// `cobra.MinimumNArgs(1)` validator (which cobra still runs under
+// DisableFlagParsing, but the inline guard is the source of truth so a future
+// flag addition can't reintroduce the parse). All tokens are forwarded to
+// exec.Command(args[0], args[1:]...) untouched.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run <cmd> [args...]",
-		Short: "Run a coding-agent CLI through the local kill-switch proxy",
-		Args:  cobra.MinimumNArgs(1),
+		Use:                "run <cmd> [args...]",
+		Short:              "Run a coding-agent CLI through the local kill-switch proxy",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("fuse run requires a command to wrap (e.g. `fuse run claude`); `run` parses no flags — every token after `run` is forwarded to the child verbatim")
+			}
 			return runWrapped(cmd, args)
 		},
 	}
