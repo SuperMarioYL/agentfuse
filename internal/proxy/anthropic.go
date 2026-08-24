@@ -34,8 +34,9 @@ type anthropicResponse struct {
 	} `json:"usage"`
 	Model   string `json:"model"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Thinking string `json:"thinking"`
 	} `json:"content"`
 }
 
@@ -214,7 +215,8 @@ type anthropicStreamEvent struct {
 		} `json:"usage"`
 	} `json:"message"`
 	Delta *struct {
-		Text string `json:"text"` // content_block_delta
+		Text     string `json:"text"`     // content_block_delta (text_delta)
+		Thinking string `json:"thinking"` // content_block_delta (thinking_delta)
 	} `json:"delta"`
 	Usage *struct {
 		InputTokens  int `json:"input_tokens"`
@@ -274,8 +276,20 @@ func parseAnthropicUsage(body []byte) (int, int, string, string) {
 				}
 			}
 		}
-		if ev.Delta != nil && ev.Delta.Text != "" {
-			text.WriteString(ev.Delta.Text)
+		if ev.Delta != nil {
+			if ev.Delta.Text != "" {
+				text.WriteString(ev.Delta.Text)
+			}
+			// Anthropic extended-thinking streams emit the reasoning trace
+			// under delta.thinking (delta.type="thinking_delta"), not
+			// delta.text. Accumulate it so EstimateCompletion sees reasoning
+			// + visible text and the per-side streaming fallback errs
+			// conservative on thinking models — otherwise a truncated
+			// thinking stream (message_delta never arrives) bills only the
+			// visible text and realized spend can exceed the cap (fail-open).
+			if ev.Delta.Thinking != "" {
+				text.WriteString(ev.Delta.Thinking)
+			}
 		}
 		if ev.Usage != nil {
 			if ev.Usage.InputTokens > 0 {
@@ -293,16 +307,21 @@ func parseAnthropicUsage(body []byte) (int, int, string, string) {
 // response into one string, so the accuracy harness can EstimateCompletion on
 // the real completion text instead of "" (which rounds up to 100 and
 // false-triggers the §8 >25% kill criterion on unary traffic). Text blocks
-// contribute their text; non-text blocks (tool_use, etc.) contribute nothing —
-// they are not billed as completion tokens by the estimator.
+// contribute their text; thinking blocks contribute their reasoning trace
+// (billed as output_tokens by Anthropic); other blocks (tool_use, etc.)
+// contribute nothing — they are not billed as completion tokens.
 func anthropicContentText(blocks []struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Thinking string `json:"thinking"`
 }) string {
 	var b strings.Builder
 	for _, blk := range blocks {
-		if blk.Type == "text" || blk.Type == "" {
+		switch blk.Type {
+		case "text", "":
 			b.WriteString(blk.Text)
+		case "thinking":
+			b.WriteString(blk.Thinking)
 		}
 	}
 	return b.String()

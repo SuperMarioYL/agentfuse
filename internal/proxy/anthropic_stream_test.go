@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,5 +255,103 @@ func TestAnthropicPartialUsageFallsBackPerSide(t *testing.T) {
 	}
 	if got.USD <= 0 {
 		t.Fatalf("partial stream billed $0 — under-billing defect still present")
+	}
+}
+
+// anthropicThinkingSSEBody is an extended-thinking stream where a relay closed
+// mid-stream AFTER a thinking_delta frame + a short text_delta, but BEFORE the
+// final message_delta: message_start carried usage.input_tokens=1200, the
+// thinking_delta frame carried a long reasoning trace under delta.thinking
+// (NOT delta.text), and the visible text was just "Hi". This is the v0.12
+// fail-open defect class — the old accumulator only read delta.text, so the
+// thinking trace was discarded and the per-side fallback estimated outTok from
+// the visible text alone, under-billing the (often thousands of) reasoning
+// tokens Anthropic bills as output_tokens.
+const anthropicThinkingSSEBody = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_01","model":"claude-sonnet-4","usage":{"input_tokens":1200,"output_tokens":0}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me reason carefully about this problem. First I consider the constraints the user gave me and whether they conflict. Then I enumerate every candidate approach, evaluate each against the constraints, discard the ones that violate an invariant, and rank the survivors by expected utility. The user asked for X so I must guarantee Y holds before returning. I double-check the boundary conditions, the empty-input case, the concurrent-call case, and the partial-failure case, then commit to the approach that fails closed rather than open. This reasoning trace is billed as output tokens by Anthropic, so the cap must see it."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}
+
+`
+
+// TestAnthropicThinkingDeltaCaptured is the v0.12 regression for
+// fix-anthropic-thinking-delta-not-captured. A truncated extended-thinking
+// stream (thinking_delta frames + a short text_delta, NO message_delta) must
+// bill the missing OUTPUT side via EstimateCompletion of the accumulated
+// visible + reasoning text — the reasoning trace must NOT be discarded.
+// Proves the defect two ways: the billed output equals the estimate of
+// visible+thinking (thinking was accumulated), and strictly exceeds the
+// estimate of the visible text alone (thinking actually moved the number).
+func TestAnthropicThinkingDeltaCaptured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(anthropicThinkingSSEBody))
+	}))
+	defer upstream.Close()
+
+	prev := AnthropicUpstream
+	AnthropicUpstream = upstream.URL
+	defer func() { AnthropicUpstream = prev }()
+
+	led := mustOpenLedger(t)
+	cfg := &budget.Config{CapUSD: 5.00, Window: "project"}
+	s := New("/proj/thinking", cfg, led, &account.File{Accounts: map[string]account.Account{}})
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = s.Stop(ctx)
+	}()
+
+	body := []byte(`{"model":"claude-sonnet-4","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/anthropic/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", "sk-ant-test-1234567890")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	got, err := led.ProjectTotal("/proj/thinking")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Requests != 1 {
+		t.Fatalf("expected 1 request billed, got %d", got.Requests)
+	}
+	// Input side was reported by message_start — preserved verbatim.
+	if got.TokensIn != 1200 {
+		t.Fatalf("thinking stream input side should keep upstream value 1200, got %d", got.TokensIn)
+	}
+	// Output side must be the EstimateCompletion of visible + reasoning text.
+	// Extract the exact accumulated text the same way the handler does so the
+	// assertion is exact, not a magic number.
+	_, _, completionText, _ := parseAnthropicUsage([]byte(anthropicThinkingSSEBody))
+	if !strings.Contains(completionText, "Let me reason carefully") {
+		t.Fatalf("accumulated completion text dropped the thinking trace: %q", completionText)
+	}
+	wantOut := tokens.EstimateCompletion("claude-sonnet-4", completionText)
+	if got.TokensOut != wantOut {
+		t.Fatalf("thinking stream output should fall back to EstimateCompletion(visible+thinking)=%d, got %d "+
+			"(thinking_delta not accumulated?)", wantOut, got.TokensOut)
+	}
+	visibleOnly := tokens.EstimateCompletion("claude-sonnet-4", "Hi")
+	if got.TokensOut <= visibleOnly {
+		t.Fatalf("thinking stream billed output=%d, not greater than visible-only estimate=%d — "+
+			"the reasoning trace was not accumulated into the billed completion (fail-open under-billing)", got.TokensOut, visibleOnly)
+	}
+	if got.USD <= 0 {
+		t.Fatalf("thinking stream billed $0 — under-billing defect still present")
 	}
 }
