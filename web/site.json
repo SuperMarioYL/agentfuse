@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "content_version": "v0.10.0",
+  "content_version": "v0.12.0",
   "name": "agentfuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
@@ -129,8 +129,13 @@
       "en": "The local kill-switch for coding-agent spend"
     }
   },
-  "generated_at": "2026-08-12T19:47:05Z",
+  "generated_at": "2026-08-24T04:23:21Z",
   "changelog": [
+    {
+      "version": "v0.12.0",
+      "zh": "扩展思考流现在也被计入：Anthropic thinking_delta 的推理文本会累计进流式用量估算，截断的思考模型流不再只按可见文本少计输出侧、从而突破上限（fail-open 修复）。",
+      "en": "Extended-thinking streams are now counted: Anthropic thinking_delta reasoning text is accumulated into the streaming usage estimate, so a truncated thinking-model stream no longer bills only the visible text and lets spend exceed the cap (fail-open fix)."
+    },
     {
       "version": "v0.10.0",
       "zh": "按侧 tiktoken 兜底现在也作用于 Anthropic 与 OpenAI 处理器，部分用量流不再会少计输出侧而让花费突破预算上限。托管账户密钥现在也会注入到 Gemini provider。",
