@@ -6,6 +6,53 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-02
+
+A fix-only release closing the two findings from the v0.13 grill bug-hunt of
+the shipped v0.12.0 tag, each verified to a file:line. The headline is a
+textbook multi-surface version-drift defect (the v0.12.0 release commit touched
+only `internal/proxy/anthropic.go` and its test and never bumped any version
+surface); the second continues the v0.12.0 accuracy-harness thesis into the one
+path the thinking_delta fix left half-done. No net-new feature scope. Cold
+traction unchanged (2 stars / 0 forks / 0 open issues / 0 subscribers).
+
+### Fixed
+- **`fuse --version` mis-reported the shipped tag as `0.11.0`**
+  (`VERSION`, `cmd/fuse/main.go`, `web/site.json`, `CHANGELOG.md`,
+  fix-version-drift-v0.12.0-multi-surface): the v0.12.0 release commit
+  (ea07155) changed only `internal/proxy/anthropic.go` + its test and never
+  bumped any version surface, so `fuse --version` reported `0.11.0` at the
+  v0.12.0 tag (verified: `go build ./cmd/fuse && ./fuse --version`). `VERSION`
+  read `0.11.0` (stale by one), `cmd/fuse/main.go:13` `var version = "0.11.0"`
+  (the literal `--version` reads under `go build`/`go install` — the documented
+  install path; goreleaser's ldflags would inject the right value for a release
+  binary, but a source build mis-reports), `web/site.json` `content_version`
+  was `v0.10.0` at the tag (stale by two — never bumped for v0.11.0 or v0.12.0),
+  and `CHANGELOG.md` had no `## [0.12.0]` entry. All surfaces now read
+  `0.13.0`/`v0.13.0`, and a lockstep test (`cmd/fuse/version_lockstep_test.go`)
+  asserts the `VERSION` file, the `main.go` version var, and the site
+  `content_version` + latest changelog entry all agree so the next bump cannot
+  silently drift.
+- **OpenAI Responses-API unary reasoning-summary text was not captured**
+  (`internal/proxy/responses.go`, fix-openai-responses-unary-reasoning-not-captured):
+  the v0.12.0 `fix-anthropic-thinking-delta-not-captured` milestone closed the
+  Anthropic reasoning gap in both the stream and unary paths and asserted "the
+  OpenAI Responses parser is NOT affected — its Delta is a json.RawMessage that
+  accumulates any string delta, including reasoning." That holds for the STREAM
+  path but is false for the UNARY path: a unary `/v1/responses` reasoning-model
+  (o3/gpt-5) body carries its trace under `output[].summary[]` (item type
+  `reasoning`, content type `summary_text`), NOT under `output[].content[]`,
+  which `responsesUnary`/`responsesOutputText` alone read. So a unary o3
+  response recorded `EstimateCompletion(final-answer-only)` against
+  `output_tokens` (which include the reasoning tokens) — structurally low,
+  false-triggering the §8 >25% kill criterion the v0.4/v0.5/v0.12 harness fixes
+  were built to make honestly measurable (same defect class the v0.12.0 fix
+  closed for Anthropic unary thinking). Billing was unaffected
+  (`CostFromUsageWithProvider` uses upstream `output_tokens`). The unary parser
+  now reads `summary` entries from reasoning items too; a regression test
+  (`internal/proxy/responses_unary_reasoning_test.go`) feeds a unary o3 body
+  and asserts the captured completion text includes the reasoning summary.
+
 ## [0.11.0] — 2026-08-19
 
 A fix-only release closing the four findings from the v0.11 grill bug-hunt,

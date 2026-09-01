@@ -39,6 +39,11 @@ type responsesStreamEvent struct {
 
 // responsesUnary is the non-streamed /v1/responses JSON object: usage is
 // top-level and the assistant text lives under output[].content[].text.
+// Reasoning-model (o3/gpt-5) responses ALSO carry a reasoning trace under
+// output[].summary[] (item type "reasoning", content type "summary_text"),
+// which OpenAI bills as part of output_tokens — so the accuracy harness must
+// EstimateCompletion on the reasoning + final-answer text, not just the
+// final-answer content. v0.13: fix-openai-responses-unary-reasoning-not-captured.
 type responsesUnary struct {
 	Model string `json:"model"`
 	Usage *struct {
@@ -51,6 +56,12 @@ type responsesUnary struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		// Summary carries the reasoning trace on reasoning-typed output items
+		// (type "summary_text"). Absent on message-typed items.
+		Summary []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"summary"`
 	} `json:"output"`
 }
 
@@ -81,7 +92,7 @@ func parseOpenAIResponsesUsage(body []byte) (int, int, string, string) {
 	var (
 		inTok, outTok int
 		text          strings.Builder
-		model          string
+		model         string
 	)
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimSpace(line)
@@ -123,19 +134,34 @@ func parseOpenAIResponsesUsage(body []byte) (int, int, string, string) {
 
 // responsesOutputText flattens a unary Responses response's output items into
 // one string so the accuracy harness can EstimateCompletion on the real
-// completion text instead of "".
+// completion text instead of "". Message-typed items contribute their
+// output_text content; reasoning-typed items contribute their summary_text
+// (billed by OpenAI as part of output_tokens) — otherwise a unary o3/gpt-5
+// response measures EstimateCompletion(final-answer-only) vs output_tokens
+// (which include reasoning) and false-triggers the §8 >25% kill criterion,
+// the same defect class the v0.12.0 thinking_delta fix closed for Anthropic
+// unary thinking. v0.13: fix-openai-responses-unary-reasoning-not-captured.
 func responsesOutputText(items []struct {
 	Type    string `json:"type"`
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
+	Summary []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"summary"`
 }) string {
 	var b strings.Builder
 	for _, item := range items {
 		for _, c := range item.Content {
 			if c.Type == "output_text" || c.Type == "text" || c.Type == "" {
 				b.WriteString(c.Text)
+			}
+		}
+		for _, s := range item.Summary {
+			if s.Type == "summary_text" || s.Type == "text" || s.Type == "" {
+				b.WriteString(s.Text)
 			}
 		}
 	}

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "content_version": "v0.12.0",
+  "content_version": "v0.13.0",
   "name": "agentfuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
@@ -131,6 +131,11 @@
   },
   "generated_at": "2026-08-24T04:23:21Z",
   "changelog": [
+    {
+      "version": "v0.13.0",
+      "zh": "fuse --version 现在如实报告所发布标签的版本（v0.12.0 发布只改了处理器代码，VERSION、main.go 版本号与 CHANGELOG 全部滞留为 0.11.0，站点内容版本还停在更早的值）；同时补齐 OpenAI Responses API 单次返回里推理摘要文本的捕获，让准确度采样器在 o3/gpt-5 单次请求上测到诚实的估值。",
+      "en": "fuse --version now reports the shipped tag honestly (the v0.12.0 release changed only the handler code, leaving VERSION, the main.go version literal, and the CHANGELOG stale at 0.11.0, and the site content version lagging even further); the OpenAI Responses-API unary reasoning-summary text is now captured too, so the accuracy harness measures an honest estimate on unary o3/gpt-5 traffic."
+    },
     {
       "version": "v0.12.0",
       "zh": "扩展思考流现在也被计入：Anthropic thinking_delta 的推理文本会累计进流式用量估算，截断的思考模型流不再只按可见文本少计输出侧、从而突破上限（fail-open 修复）。",
