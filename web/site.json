@@ -211,5 +211,6 @@
         "code": "cd /path/to/your/project\nfuse init --cap 5\nfuse prices --check openai/gpt-4o --diff\nfuse status\nfuse cap +5"
       }
     ]
-  }
+  },
+  "content_version": "v0.13.0"
 }
