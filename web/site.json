@@ -148,6 +148,10 @@
           "alt": {
             "en": "Follow the operation",
             "zh": "处理过程"
+          },
+          "mobile": {
+            "light": "/assets/presentation/process-mobile-light.svg",
+            "dark": "/assets/presentation/process-mobile-dark.svg"
           }
         }
       },
@@ -166,6 +170,10 @@
           "alt": {
             "en": "A request gate around the child command",
             "zh": "围绕子命令的请求检查"
+          },
+          "mobile": {
+            "light": "/assets/presentation/architecture-mobile-light.svg",
+            "dark": "/assets/presentation/architecture-mobile-dark.svg"
           }
         }
       },
@@ -184,6 +192,10 @@
           "alt": {
             "en": "Connect the pieces",
             "zh": "输入与输出"
+          },
+          "mobile": {
+            "light": "/assets/presentation/integrations-mobile-light.svg",
+            "dark": "/assets/presentation/integrations-mobile-dark.svg"
           }
         }
       }
@@ -212,5 +224,22 @@
       }
     ]
   },
-  "content_version": "v0.13.0"
+  "content_version": "v0.13.0",
+  "changelog": [
+    {
+      "version": "v0.13.0",
+      "zh": "fuse --version 现在如实报告所发布标签的版本（v0.12.0 发布只改了处理器代码，VERSION、main.go 版本号与 CHANGELOG 全部滞留为 0.11.0，站点内容版本还停在更早的值）；同时补齐 OpenAI Responses API 单次返回里推理摘要文本的捕获，让准确度采样器在 o3/gpt-5 单次请求上测到诚实的估值。",
+      "en": "fuse --version now reports the shipped tag honestly (the v0.12.0 release changed only the handler code, leaving VERSION, the main.go version literal, and the CHANGELOG stale at 0.11.0, and the site content version lagging even further); the OpenAI Responses-API unary reasoning-summary text is now captured too, so the accuracy harness measures an honest estimate on unary o3/gpt-5 traffic."
+    },
+    {
+      "version": "v0.12.0",
+      "zh": "扩展思考流现在也被计入：Anthropic thinking_delta 的推理文本会累计进流式用量估算，截断的思考模型流不再只按可见文本少计输出侧、从而突破上限（fail-open 修复）。",
+      "en": "Extended-thinking streams are now counted: Anthropic thinking_delta reasoning text is accumulated into the streaming usage estimate, so a truncated thinking-model stream no longer bills only the visible text and lets spend exceed the cap (fail-open fix)."
+    },
+    {
+      "version": "v0.10.0",
+      "zh": "按侧 tiktoken 兜底现在也作用于 Anthropic 与 OpenAI 处理器，部分用量流不再会少计输出侧而让花费突破预算上限。托管账户密钥现在也会注入到 Gemini provider。",
+      "en": "The per-side tiktoken fallback now applies to the Anthropic and OpenAI handlers too, so a partial-usage stream can no longer under-bill the output side and let spend exceed the cap. The managed account key is now injected for the Gemini provider."
+    }
+  ]
 }
