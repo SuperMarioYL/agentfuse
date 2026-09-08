@@ -1,150 +1,215 @@
 {
-  "schema": 1,
-  "content_version": "v0.13.0",
-  "name": "agentfuse",
+  "schema": 3,
+  "name": "AgentFuse",
   "github": "https://github.com/SuperMarioYL/agentfuse",
   "host": "agentfuse.lei6393.com",
+  "palette": "auto",
   "lang": {
-    "primary": "zh",
+    "primary": "en",
     "toggle": true
   },
-  "accent": [
-    "#F59E0B"
-  ],
+  "meta": {
+    "visual_style": "neon-particle",
+    "demo_source": "docs/demo-results.json"
+  },
   "hero": {
-    "eyebrow": {
-      "zh": "到顶即停 · 请求不出本机 · 不挂后台 · 不回传数据",
-      "en": "Stops at the cap · Stays on your machine · No background process · Phones nothing home"
-    },
     "headline": {
-      "zh": "给编码 Agent 设一道硬上限\n到顶就停，下一条请求不出本机",
-      "en": "A hard cap on what your coding agent can spend\n— it stops at the line, before the next request leaves"
+      "en": "Give each agent project a spending boundary",
+      "zh": "为每个 Agent 项目设定支出边界"
     },
     "sub": {
-      "zh": "在项目根目录放一个 .fuse.toml，写上这项目最多花几美元——或每天最多花多少。你的 claude、codex、aider 跑过夜循环时，累计花费一到上限就停，下一条请求直接在本机被挡回。想把它指向你自己的上游网关也行，上限照常守住。不挂后台、不上云、不回传任何数据。一个会偷偷回传数据的熔断器，本身就是问题。",
-      "en": "Drop a .fuse.toml at your project root with a USD cap — per project, or per day. When your claude, codex, or aider runs an overnight loop, the moment cumulative spend hits the cap it stops — the next request is turned back at your machine. Point it at your own upstream gateway if you like; the cap still holds. No background process, no cloud, nothing phoned home. A kill-switch that phones home is itself the problem."
+      "en": "AgentFuse wraps a command with a local API proxy, checks its configured budget before forwarding requests, and records usage in a local ledger. Inspect the price table before relying on the cost estimate.",
+      "zh": "AgentFuse 启动命令时插入本地 API 代理，在转发请求前检查预算，并把用量写入本地账本。先核对模型价格，再使用费用估算设置项目上限。"
     },
-    "command": "fuse run claude",
-    "cta": {
-      "zh": "开始使用",
-      "en": "Get started"
-    },
-    "ctaGithub": {
-      "zh": "在 GitHub 查看",
-      "en": "View on GitHub"
-    }
+    "href": "#quickstart"
   },
   "advantages": [
     {
       "title": {
-        "zh": "到顶就停，并发也冲不过上限",
-        "en": "Stops at the cap — even under concurrent load"
+        "en": "Project or daily windows",
+        "zh": "项目或每日窗口"
       },
       "body": {
-        "zh": "一个过夜循环里，几十条请求可能同时往外冲。agentfuse 在每条请求出门前都核对一次累计花费——到顶就挡回，不管同时有多少条在飞。被挡回的那条会告诉你为什么、该怎么办，不再是一句空话。想要按天设上限？到你的本地午夜自动清零，不是 UTC 零点。没有“差一点没卡住”这种事。",
-        "en": "In an overnight loop, dozens of requests can race out at once. agentfuse checks the running total before each one leaves — and turns back any that would cross the line, no matter how many are in flight. The denied request tells you why and what to do — not a blank line. Want a per-day cap? It auto-resets at YOUR local midnight, not UTC midnight. There's no 'almost held' here."
-      },
-      "chips": [
-        "› 每条请求出门前核对",
-        "› 到顶即挡回",
-        "› 并发也守得住",
-        "› 挡回的那条会告诉你为什么",
-        "› 按天上限到本地午夜清零"
-      ]
+        "en": "Choose a cumulative project cap or a window that resets at local midnight.",
+        "zh": "可使用项目累计上限，或按本地午夜重置的每日窗口。"
+      }
     },
     {
       "title": {
-        "zh": "不管你用哪家的模型、指向哪个上游，上限都一样",
-        "en": "Same cap, whichever model — and whichever upstream you point it at"
+        "en": "Inspect the estimate",
+        "zh": "查看估算依据"
       },
       "body": {
-        "zh": "一份 .fuse.toml、一行 fuse run，管住你接的每一家模型服务，也管住你把它指向的任何自定义上游——你的网关、你的区域端点。流式回复漏报花费时，agentfuse 在本地把花费补回来，绝不悄悄记一笔 $0。流式回复的每一种形状现在都照算：再没有一种流式能让花费悄悄绕过上限。一个挂起的上游也不会把你的额度占住不放——几分钟内自动退还，上限不被一条卡住的请求拖垮。",
-        "en": "One .fuse.toml, one fuse run — the cap holds across every model service you've configured, and across any custom upstream you point it at: your gateway, your regional endpoint. When a streamed reply omits its usage, agentfuse reconstructs the cost locally — it never silently bills $0. Every shape of streamed reply is now counted: no streamed shape can quietly slip past the cap. And a stalled upstream won't hold your budget hostage — the reservation releases within minutes, so one hung request can't drag the cap down."
-      },
-      "chips": [
-        "› 一份配置管所有模型服务",
-        "› 可指向你自己的上游",
-        "› 漏报花费本地补回，绝不记 $0",
-        "› 流式回复每一种形状都照算",
-        "› 上游卡住不锁死额度"
-      ]
+        "en": "Read bundled prices, overrides, unknown-model fallbacks and overlay drift without making a provider call.",
+        "zh": "无需调用服务商即可查看内置价格、覆盖值、未知模型回退和价格差异。"
+      }
     },
     {
       "title": {
-        "zh": "价格表在你本机，从不联网",
-        "en": "Prices live on your machine, never fetched"
+        "en": "Keep a local ledger",
+        "zh": "保留本地账本"
       },
       "body": {
-        "zh": "模型价格内置在工具里，你可以按机器覆盖。agentfuse 从不联网取价——这是它能当熔断器的前提。fuse prices --diff 还会告诉你：你的本地覆盖里，哪些压住了已变动的默认值，哪些指向已经下架的模型。",
-        "en": "Model prices ship inside the tool; you override them per machine. agentfuse never fetches a price over the network — that's the premise for a tool allowed to cut off your spend. fuse prices --diff shows which of your overrides shadow a default that has since moved, and which point at a model that has since been retired."
+        "en": "bbolt stores request counts, token usage and configured dollar costs for status reporting.",
+        "zh": "bbolt 保存请求数、Token 用量和按配置计算的费用，供 status 查询。"
+      }
+    }
+  ],
+  "demo": {
+    "title": {
+      "en": "Run it on a complete example",
+      "zh": "运行完整示例"
+    },
+    "note": {
+      "en": "The supplied Go example runs the production bundled-price resolver for gpt-4o and an unlisted model. Token counts are explicit example inputs, not a live response.",
+      "zh": "随仓 Go 示例使用实际价格解析器查询 gpt-4o 与未收录模型。Token 数量是明确给定的示例输入，不来自在线响应。"
+    },
+    "source": "https://github.com/SuperMarioYL/agentfuse/blob/main/docs/demo-results.json",
+    "steps": [
+      {
+        "label": "Recorded run",
+        "body": "Local bundled-price resolution and configured cost arithmetic. No provider traffic or live spend.",
+        "command": "go run ./examples/presentation",
+        "output": "Bundled price snapshot: 2026-05\nopenai/gpt-4o explicit=true input_per_1k=0.0025 output_per_1k=0.0100\n  configured cost for 1000 input + 100 output tokens: $0.0035\nopenai/unlisted-demo-model explicit=false input_per_1k=0.0050 output_per_1k=0.0200\n  configured cost for 1000 input + 100 output tokens: $0.0070\nScope: local price-table arithmetic; no provider request or measured spend.",
+        "image": "/assets/presentation/demo-0-light.svg",
+        "imageDark": "/assets/presentation/demo-0-dark.svg"
+      }
+    ]
+  },
+  "quickstart": {
+    "title": {
+      "en": "Try it locally",
+      "zh": "本地上手"
+    },
+    "body": {
+      "en": "The supplied Go example runs the production bundled-price resolver for gpt-4o and an unlisted model. Token counts are explicit example inputs, not a live response.",
+      "zh": "随仓 Go 示例使用实际价格解析器查询 gpt-4o 与未收录模型。Token 数量是明确给定的示例输入，不来自在线响应。"
+    },
+    "steps": [
+      {
+        "title": {
+          "en": "Install from source",
+          "zh": "从源码安装"
+        },
+        "code": "git clone https://github.com/SuperMarioYL/agentfuse.git\ncd agentfuse\ngo build -o bin/fuse ./cmd/fuse"
       },
-      "chips": [
-        "› 价格内置，可覆盖",
-        "› fuse prices --diff 看漂移",
-        "› 零联网取价"
-      ]
+      {
+        "title": {
+          "en": "Run the included example",
+          "zh": "运行随仓示例"
+        },
+        "code": "go run ./examples/presentation"
+      }
+    ]
+  },
+  "limitations": [
+    {
+      "en": "Budget decisions depend on configured rates, estimated output and supported usage parsing; they do not guarantee the final provider bill.",
+      "zh": "预算决策依赖配置价格、输出估算和支持的用量解析，不能保证服务商最终账单金额。"
     },
     {
-      "title": {
-        "zh": "全部留在本机，三十秒能审完",
-        "en": "Everything stays local — auditable in 30 seconds"
-      },
-      "body": {
-        "zh": "花费只写在你本机的一个文件里，工具随你那条 Agent 命令一起退出，不挂后台。除了你配的那家模型服务，它不和任何东西通信。三十秒就能审完它会不会回传数据——一个会偷偷回传的熔断器，本身就是信任问题。",
-        "en": "Spend is written to a single file on your machine; the tool exits with the agent command it wrapped — nothing lingers in the background. It talks to nothing but the model service you configured. You can audit in thirty seconds whether it phones anything home — a kill-switch that phones home is itself the trust problem."
-      },
-      "chips": [
-        "› 花费只写本机",
-        "› 不挂后台",
-        "› 三十秒可审"
-      ]
+      "en": "The recorded example exercises price resolution only; it does not test live proxy traffic or account credentials.",
+      "zh": "记录的示例仅运行价格解析，没有验证在线代理流量或账户凭据。"
+    },
+    {
+      "en": "Calls that bypass the proxy are outside its ledger and budget.",
+      "zh": "绕过代理的调用不在账本和预算管理范围内。"
     }
   ],
   "scene": {
-    "kind": "hub-nodes",
-    "nodes": [
-      "Overnight loop",
-      "Wrong account",
-      "Budget drain",
-      "Untracked spend"
+    "kind": "neon-graph",
+    "fallback": "/assets/presentation/scene-dark.svg",
+    "fallbackLight": "/assets/presentation/scene-light.svg"
+  },
+  "story": {
+    "intro": {
+      "title": {
+        "en": "A concrete task",
+        "zh": "从实际任务出发"
+      },
+      "body": {
+        "en": "An autonomous coding session can make many API calls before you inspect the bill. A project budget makes the next request an explicit decision: the proxy reserves estimated cost, forwards accepted calls and reconciles the returned usage.",
+        "zh": "自动运行的编程会话可能在查看账单前就发出大量 API 请求。项目预算把下一次请求变成明确决策：代理预留估算费用，转发获准请求，再依据响应中的用量结算。"
+      }
+    },
+    "sections": [
+      {
+        "title": {
+          "en": "Follow the operation",
+          "zh": "处理过程"
+        },
+        "body": {
+          "en": "The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.",
+          "zh": "启动器为子命令改写服务商基础 URL。代理检查账户并在 bbolt 账本中预留预算，再通过对应协议处理器转发请求。返回用量用于结算预留费用；支持的用量缺失场景由本地 Token 估算补充。价格解析器统一处理模型前缀匹配和覆盖优先级。"
+        },
+        "image": {
+          "light": "/assets/presentation/process-light.svg",
+          "dark": "/assets/presentation/process-dark.svg",
+          "alt": {
+            "en": "Follow the operation",
+            "zh": "处理过程"
+          }
+        }
+      },
+      {
+        "title": {
+          "en": "A request gate around the child command",
+          "zh": "围绕子命令的请求检查"
+        },
+        "body": {
+          "en": "The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.",
+          "zh": "启动器为子命令改写服务商基础 URL。代理检查账户并在 bbolt 账本中预留预算，再通过对应协议处理器转发请求。返回用量用于结算预留费用；支持的用量缺失场景由本地 Token 估算补充。价格解析器统一处理模型前缀匹配和覆盖优先级。"
+        },
+        "image": {
+          "light": "/assets/presentation/architecture-light.svg",
+          "dark": "/assets/presentation/architecture-dark.svg",
+          "alt": {
+            "en": "A request gate around the child command",
+            "zh": "围绕子命令的请求检查"
+          }
+        }
+      },
+      {
+        "title": {
+          "en": "Connect the pieces",
+          "zh": "输入与输出"
+        },
+        "body": {
+          "en": "The provider handlers translate request and response shapes; your selected client must honor the base URL configured by the launcher. AgentFuse accounts for traffic that passes through its proxy. The local price table is separate from the provider invoice.",
+          "zh": "服务商处理器适配请求和响应格式；所选客户端须遵循启动器设置的基础 URL。AgentFuse 统计经过其代理的流量。本地价格表与服务商最终账单是两个不同依据。"
+        },
+        "image": {
+          "light": "/assets/presentation/integrations-light.svg",
+          "dark": "/assets/presentation/integrations-dark.svg",
+          "alt": {
+            "en": "Connect the pieces",
+            "zh": "输入与输出"
+          }
+        }
+      }
+    ],
+    "details": [
+      {
+        "title": {
+          "en": "Configuration",
+          "zh": "配置"
+        },
+        "body": {
+          "en": "The nearest .fuse.toml owns cap_usd, window (project/daily), account, provider and optional upstream_url. openai_compat requires an upstream URL. ~/.fuse/accounts.toml holds named account credentials; ~/.fuse/prices.toml overrides model rates; ~/.fuse/ledger.db holds usage. The bundled price snapshot is historical and never updates itself from the network.",
+          "zh": "最近的 .fuse.toml 定义 cap_usd、window（project/daily）、account、provider 和可选 upstream_url。openai_compat 必须填写上游 URL。~/.fuse/accounts.toml 保存命名账户凭据，~/.fuse/prices.toml 覆盖模型价格，~/.fuse/ledger.db 保存用量。内置价格是历史快照，不会自行联网更新。"
+        }
+      },
+      {
+        "title": {
+          "en": "Further use",
+          "zh": "进一步使用"
+        },
+        "body": {
+          "en": "After building, add this repository’s bin directory to PATH or use the binary’s full path. In a chosen project, init creates .fuse.toml; cap changes its limit; status reads the ledger. For a configured API client, fuse run <command> starts the proxy and exits with the child. A named account requires its matching account configuration.",
+          "zh": "构建后将本仓库 bin 目录加入 PATH，或使用二进制完整路径。在目标项目中，init 创建 .fuse.toml，cap 修改上限，status 查询账本。配置好 API 客户端后，fuse run <command> 启动代理并跟随子进程退出。命名账户需要对应的账户配置。"
+        },
+        "code": "cd /path/to/your/project\nfuse init --cap 5\nfuse prices --check openai/gpt-4o --diff\nfuse status\nfuse cap +5"
+      }
     ]
-  },
-  "cta": {
-    "headline": {
-      "zh": "一行 .fuse.toml，守住每个项目的上限",
-      "en": "One .fuse.toml, one cap per project"
-    },
-    "sub": {
-      "zh": "开源、Apache-2.0、无付费墙。在你本机给 Agent 设上限这件事，永不收费。",
-      "en": "Open source, Apache-2.0, no paywall. The act of capping your agent locally is never gated."
-    },
-    "button": {
-      "zh": "在 GitHub 上开始",
-      "en": "Get started on GitHub"
-    }
-  },
-  "footer": {
-    "tag": {
-      "zh": "给编码 Agent 花费装的本地熔断器",
-      "en": "The local kill-switch for coding-agent spend"
-    }
-  },
-  "generated_at": "2026-08-24T04:23:21Z",
-  "changelog": [
-    {
-      "version": "v0.13.0",
-      "zh": "fuse --version 现在如实报告所发布标签的版本（v0.12.0 发布只改了处理器代码，VERSION、main.go 版本号与 CHANGELOG 全部滞留为 0.11.0，站点内容版本还停在更早的值）；同时补齐 OpenAI Responses API 单次返回里推理摘要文本的捕获，让准确度采样器在 o3/gpt-5 单次请求上测到诚实的估值。",
-      "en": "fuse --version now reports the shipped tag honestly (the v0.12.0 release changed only the handler code, leaving VERSION, the main.go version literal, and the CHANGELOG stale at 0.11.0, and the site content version lagging even further); the OpenAI Responses-API unary reasoning-summary text is now captured too, so the accuracy harness measures an honest estimate on unary o3/gpt-5 traffic."
-    },
-    {
-      "version": "v0.12.0",
-      "zh": "扩展思考流现在也被计入：Anthropic thinking_delta 的推理文本会累计进流式用量估算，截断的思考模型流不再只按可见文本少计输出侧、从而突破上限（fail-open 修复）。",
-      "en": "Extended-thinking streams are now counted: Anthropic thinking_delta reasoning text is accumulated into the streaming usage estimate, so a truncated thinking-model stream no longer bills only the visible text and lets spend exceed the cap (fail-open fix)."
-    },
-    {
-      "version": "v0.10.0",
-      "zh": "按侧 tiktoken 兜底现在也作用于 Anthropic 与 OpenAI 处理器，部分用量流不再会少计输出侧而让花费突破预算上限。托管账户密钥现在也会注入到 Gemini provider。",
-      "en": "The per-side tiktoken fallback now applies to the Anthropic and OpenAI handlers too, so a partial-usage stream can no longer under-bill the output side and let spend exceed the cap. The managed account key is now injected for the Gemini provider."
-    }
-  ]
+  }
 }

@@ -1,230 +1,132 @@
-**English** | [简体中文](./README.zh-CN.md)
+[简体中文](./README.zh-CN.md) · [Website](https://agentfuse.lei6393.com) · [GitHub](https://github.com/SuperMarioYL/agentfuse)
 
-<p align="center">
-  <a href="https://github.com/SuperMarioYL/agentfuse">
-    <img src="https://capsule-render.vercel.app/api?type=waving&color=0:7C2D12,100:F59E0B&height=200&section=header&text=AgentFuse&fontSize=70&fontColor=ffffff&desc=The%20local%20kill-switch%20proxy%20for%20coding-agent%20CLIs&descSize=16&descAlignY=68" alt="AgentFuse banner" />
-  </a>
-</p>
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/hero-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/hero-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/hero-dark.svg">
+  <img src="./assets/presentation/hero-light.svg" width="960" alt="Hero diagram">
+</picture>
 
-<p align="center">
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/SuperMarioYL/agentfuse?color=blue" /></a>
-  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.24-00ADD8?logo=go&logoColor=white" /></a>
-  <a href="https://github.com/SuperMarioYL/agentfuse/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/SuperMarioYL/agentfuse?include_prereleases&sort=semver&color=7C2D12&label=release" /></a>
-  <a href="CHANGELOG.md"><img alt="Version" src="https://img.shields.io/badge/version-v0.2.0-F59E0B" /></a>
-  <a href="https://github.com/SuperMarioYL/agentfuse/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SuperMarioYL/agentfuse/actions/workflows/ci.yml/badge.svg" /></a>
-  <a href="#v020--multi-provider"><img alt="Providers" src="https://img.shields.io/badge/providers-Anthropic%20%7C%20OpenAI%20%7C%20Gemini%20%7C%20DeepSeek%20%7C%20OpenAI--compat-7C2D12" /></a>
-</p>
+# AgentFuse
 
-<p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&size=18&pause=1500&color=F59E0B&center=true&width=620&lines=Anthropic+%7C+OpenAI+%7C+Gemini+%7C+DeepSeek+%7C+OpenAI-compat;One+binary.+One+cap.+Five+wire+formats.;Local+tokenizer+fallback.+Zero+telemetry." alt="provider rotation" />
-</p>
+**Give each agent project a spending boundary**
 
-<p align="center"><em>A single Go binary that hard-caps what your <code>claude</code>, <code>codex</code>, or any coding-agent CLI is allowed to spend — per project, locally, with no daemon and no telemetry.</em></p>
+AgentFuse wraps a command with a local API proxy, checks its configured budget before forwarding requests, and records usage in a local ledger. Inspect the price table before relying on the cost estimate.
 
----
+## Why use it
 
-## Table of contents
+An autonomous coding session can make many API calls before you inspect the bill. A project budget makes the next request an explicit decision: the proxy reserves estimated cost, forwards accepted calls and reconciles the returned usage.
 
-- [Why this exists](#why-this-exists)
-- [Architecture](#-architecture)
-- [Install &amp; quickstart](#install--quickstart)
-- [Demo](#demo)
-- [v0.2.0 — multi-provider](#v020--multi-provider)
-- [Configuration](#configuration)
-- [Commands](#commands)
-- [How it works](#how-it-works)
-- [Roadmap](#roadmap)
-- [License &amp; contributing](#license--contributing)
+- **Project or daily windows** — Choose a cumulative project cap or a window that resets at local midnight.
+- **Inspect the estimate** — Read bundled prices, overrides, unknown-model fallbacks and overlay drift without making a provider call.
+- **Keep a local ledger** — bbolt stores request counts, token usage and configured dollar costs for status reporting.
 
----
+## Architecture
 
-## Why this exists
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/architecture-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/architecture-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/architecture-dark.svg">
+  <img src="./assets/presentation/architecture-light.svg" width="960" alt="Architecture diagram">
+</picture>
 
-Coding-agent CLIs went from "press Enter for each turn" to overnight autonomous loops in under a year, and the billing model has not caught up. A single stray `.env` was enough to route **$187** of agent traffic to the wrong Anthropic account ([the PSA thread that started this repo, 476↑](https://reddit.com/r/ClaudeAI/comments/1tbaq2d/)). Overnight loops chew through Max-plan budgets. The June 15 `--print` reclassification flips scripts that ran for months from "subscription" to "credit-billed."
+The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.
 
-AgentFuse is the kill-switch that PSA asked for: a tiny local proxy that reads a `.fuse.toml` from your project root and **fails closed** the moment cumulative spend hits the cap. The next request never leaves your machine. No daemon. No cloud. Audit it with `strings` in thirty seconds.
+| Component | Responsibility |
+| --- | --- |
+| `Launcher` | internal/cli/run.go |
+| `Proxy` | account and provider handlers |
+| `Ledger` | atomic budget reservations |
+| `Price resolver` | bundled table and overrides |
 
-## <img src="https://api.iconify.design/tabler/topology-star-3.svg?color=%23F59E0B" width="20" height="20" align="center" /> Architecture
+## Install and quickstart
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/atlas-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/atlas-light.svg">
-    <img src="./assets/atlas-light.svg" width="880" alt="A coding-agent CLI child is pointed at the local AgentFuse proxy, which runs account guard, pre-flight estimate and ledger-vs-cap check; ALLOW forwards to the configured provider and DENY returns HTTP 402; every reply's usage is written to the local bbolt ledger">
-  </picture>
-</p>
-
-`fuse run <cmd>` execs your coding-agent CLI as a child and rewrites its base URL to a random `127.0.0.1` port — the **AgentFuse proxy**. Every request passes four fail-closed gates: account guard (fingerprint match against `~/.fuse/accounts.toml`), a tiktoken pre-flight estimate, a ledger check against `cap_usd`, then **ALLOW → forward** to the configured provider or **DENY → HTTP 402**. Each reply's `usage` is written to the local bbolt ledger keyed by `(project, day)`. Nothing leaves the box except the upstream call you asked for.
-
-## Install &amp; quickstart
-
-<img align="right" width="48" src="https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/rocket.svg" alt="" />
+Go 1.24 or newer. The example needs no credentials.
 
 ```bash
-# 1. install (Go 1.24+)
-go install github.com/SuperMarioYL/agentfuse/cmd/fuse@latest
-
-# 2. drop a $5 cap into your project
-cd ~/code/myproj && fuse init
-
-# 3. run your coding-agent CLI through the proxy
-fuse run claude
+git clone https://github.com/SuperMarioYL/agentfuse.git
+cd agentfuse
+go build -o bin/fuse ./cmd/fuse
 ```
 
-<details>
-<summary>Sample stdout when the cap fires</summary>
-
-```text
-$ fuse run claude
-agentfuse: proxy on 127.0.0.1:54021 → api.anthropic.com (account=personal, cap=$5.00 project)
-agentfuse: forwarding child stdio …
-
-[claude session prints normally for a while …]
-
-agentfuse: budget exceeded for project /Users/you/code/myproj ($5.02 / $5.00) — raise with: fuse cap +5
-claude: API request denied (HTTP 402): budget exceeded. exiting.
-```
-
-```text
-$ fuse status
-project:    /Users/you/code/myproj
-account:    personal
-cap:        $5.00 (project window)
-
-today:      $0.4317   (12 req, 145020 in / 9802 out tokens)
-project:    $5.0231   (318 req)
-remaining:  $0.0000   ✗ over cap — next request will be denied
-```
-
-</details>
-
-## <img src="https://api.iconify.design/tabler/photo.svg?color=%23F59E0B" width="20" height="20" align="center" /> Demo
-
-<p align="center">
-  <img src="./assets/demo.gif" alt="fuse init → fuse run → cap fires → HTTP 402 → fuse cap +5 → resume" width="820" />
-</p>
-
-<sub>↑ Terminal recording, rendered in CI with <a href="https://github.com/charmbracelet/vhs">vhs</a> from <a href="./docs/demo.tape">docs/demo.tape</a> (regenerated on each release tag). It shows `fuse init` → `fuse run` → a runaway loop → the cap firing with HTTP 402 → `fuse cap +5` → resume.</sub>
-
-## v0.2.0 — multi-provider
-
-<img align="right" width="48" src="https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/world.svg" alt="" />
-
-v0.1 shipped Anthropic + OpenAI. v0.2 broadens the same kill-switch — same binary, same `fuse run`, same `.fuse.toml` schema — to **five provider families**, and closes the "stream omits `usage`" hole by re-tokenizing locally with [tiktoken-go](https://github.com/pkoukk/tiktoken-go).
-
-| Provider          | `provider = "..."` in `.fuse.toml` | Wire format                          | Usage source                                     |
-| ----------------- | ---------------------------------- | ------------------------------------ | ------------------------------------------------ |
-| Anthropic         | `"anthropic"` (default)            | Messages API + native SSE `usage`    | Upstream `usage` block                           |
-| OpenAI            | `"openai"`                         | Chat Completions + `include_usage`   | Upstream `usage` block                           |
-| Google Gemini     | `"gemini"`                         | `:generateContent` / `:stream…`      | `usageMetadata` → tiktoken fallback              |
-| DeepSeek          | `"deepseek"`                       | OpenAI-compat shape                  | Final SSE `usage` (always, even w/o opt-in)      |
-| OpenAI-compat     | `"openai_compat"` + `upstream_url` | Chat Completions on any host         | Upstream `usage` if present, else **tiktoken**   |
-
-Example: route a project through Groq's Llama-3.1 with a $5 cap.
-
-```toml
-# .fuse.toml
-cap_usd      = 5.0
-provider     = "openai_compat"
-upstream_url = "https://api.groq.com/openai/v1"
-account      = "personal"
-```
+The supplied Go example runs the production bundled-price resolver for gpt-4o and an unlisted model. Token counts are explicit example inputs, not a live response.
 
 ```bash
-fuse run aider --model llama-3.1-70b
-# fuse: proxy on 127.0.0.1:51234 — provider=openai_compat upstream=api.groq.com cap=$5.00
-# … work normally … cap fires identically to v0.1
+go run ./examples/presentation
 ```
 
-Three ready-to-copy configs live under [`examples/`](./examples): `.fuse.toml.gemini`, `.fuse.toml.deepseek`, `.fuse.toml.openai-compat`.
+## Recorded demo
 
-### Pricing — externalized, user-overridable, never networked
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/process-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/process-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/process-dark.svg">
+  <img src="./assets/presentation/process-light.svg" width="960" alt="Process diagram">
+</picture>
 
-`assets/prices.toml` ships embedded in the binary as the bundled snapshot (2026-05). Override per-machine without rebuilding:
+Two local model lookups; configured costs only, no API billing measurement.
 
-```toml
-# ~/.fuse/prices.toml — user keys win on a per-(provider, model) basis.
-[openai_compat."llama-3.1-70b"]
-input_usd_per_1k  = 0.00079   # your negotiated rate
-output_usd_per_1k = 0.00099
+```text
+Bundled price snapshot: 2026-05
+openai/gpt-4o explicit=true input_per_1k=0.0025 output_per_1k=0.0100
+  configured cost for 1000 input + 100 output tokens: $0.0035
+openai/unlisted-demo-model explicit=false input_per_1k=0.0050 output_per_1k=0.0200
+  configured cost for 1000 input + 100 output tokens: $0.0070
+Scope: local price-table arithmetic; no provider request or measured spend.
 ```
 
-The binary never fetches prices from the network — that is intentional and load-bearing. Stale prices are a user problem; a kill-switch that phones home is a trust problem.
+The complete command and output are recorded in [docs/demo-results.json](./docs/demo-results.json). Inputs and reproduction code are included in the repository.
+
+## Usage
+
+After building, add this repository’s bin directory to PATH or use the binary’s full path. In a chosen project, init creates .fuse.toml; cap changes its limit; status reads the ledger. For a configured API client, fuse run <command> starts the proxy and exits with the child. A named account requires its matching account configuration.
+
+```bash
+cd /path/to/your/project
+fuse init --cap 5
+fuse prices --check openai/gpt-4o --diff
+fuse status
+fuse cap +5
+```
 
 ## Configuration
 
-A `.fuse.toml` at your project root. AgentFuse walks up from `cwd` to find the nearest one.
-
-| Key            | Type      | Default        | Meaning                                                                 |
-| -------------- | --------- | -------------- | ----------------------------------------------------------------------- |
-| `cap_usd`      | `float`   | *required*     | Hard cap in USD. Pre-flight estimates count toward this — single oversized requests cannot sneak in under the line. |
-| `window`       | `string`  | `"project"`    | `"project"` (cumulative since `fuse init`) or `"daily"` (rolls over at LOCAL midnight). |
-| `account`      | `string`  | `""`           | Named account from `~/.fuse/accounts.toml`. When set, AgentFuse refuses inbound keys that don't match this account's fingerprint and injects the right one, overriding stray `.env` keys. |
-| `provider`     | `string`  | `"anthropic"`  | One of `"anthropic"`, `"openai"`, `"gemini"`, `"deepseek"`, `"openai_compat"`. New in v0.2. |
-| `upstream_url` | `string`  | provider default | Override the upstream host. **Required** for `provider = "openai_compat"`. Optional for the others (e.g. point Gemini at Vertex AI). |
-
-Accounts live separately in `~/.fuse/accounts.toml`:
+The nearest .fuse.toml owns cap_usd, window (project/daily), account, provider and optional upstream_url. openai_compat requires an upstream URL. ~/.fuse/accounts.toml holds named account credentials; ~/.fuse/prices.toml overrides model rates; ~/.fuse/ledger.db holds usage. The bundled price snapshot is historical and never updates itself from the network.
 
 ```toml
-[accounts.personal]
-provider = "anthropic"
-api_key  = "sk-ant-..."
-
-[accounts.work]
-provider = "anthropic"
-api_key  = "sk-ant-..."
+cap_usd = 5.0
+window = "project"
+provider = "openai"
+account = ""
 ```
 
-## Commands
+## Integrations and responsibilities
 
-| Command        | What it does                                                                 |
-| -------------- | ---------------------------------------------------------------------------- |
-| `fuse init`    | Write a `.fuse.toml` in the current directory (flags: `--cap`, `--account`). |
-| `fuse run <cmd>` | Start the local proxy, point the child CLI at `127.0.0.1:<rand>`, exec `<cmd>`, exit when it does. |
-| `fuse cap +N` / `=N` / `-N` | Mutate the cap atomically (refuses any change that would land at ≤ 0). |
-| `fuse status`  | Print current account, cap, today's spend, project total, and remaining budget. |
-| `fuse prices`  | Read-only: print the resolved price table (bundled snapshot + `~/.fuse/prices.toml` overlay), the snapshot date, and the tiktoken-vs-usage accuracy. `--check <provider/model>` flags models that hit the conservative fallback. No network. |
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/integrations-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/integrations-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/integrations-dark.svg">
+  <img src="./assets/presentation/integrations-light.svg" width="960" alt="Integrations diagram">
+</picture>
 
-## How it works
+The provider handlers translate request and response shapes; your selected client must honor the base URL configured by the launcher. AgentFuse accounts for traffic that passes through its proxy. The local price table is separate from the provider invoice.
 
-```
-┌─────────────────┐                  ┌───────────────────┐
-│  fuse run claude│ ─── exec ──────► │  claude (child)   │
-└─────────────────┘                  │  ANTHROPIC_BASE   │
-                                     │  → 127.0.0.1:PORT │
-                                     └─────────┬─────────┘
-                                               │
-                                ┌──────────────▼──────────────┐
-                                │  AgentFuse proxy            │
-                                │  1. account guard           │
-                                │  2. pre-flight estimate     │
-                                │  3. ledger check vs cap     │
-                                │  4. ALLOW → forward         │
-                                │     DENY  → HTTP 402        │
-                                │  5. parse `usage`, write    │
-                                │     ~/.fuse/ledger.db       │
-                                └──────────────┬──────────────┘
-                                               │
-                                       api.anthropic.com
-                                       api.openai.com
-```
+| Route | Implemented role |
+| --- | --- |
+| Anthropic | Messages API handler |
+| OpenAI | Chat Completions and Responses |
+| Gemini | GenerateContent handlers |
+| DeepSeek / compatible | OpenAI-shaped API routes |
+| TOML + bbolt | configuration and local ledger |
 
-Everything is local: single binary, no daemon, ledger at `~/.fuse/ledger.db` (bbolt, KV: `(project, day) → {tokens_in, tokens_out, usd, requests}`). The proxy dies with the wrapped child. The binary never talks to anything other than the provider you configured.
+## Limits and next steps
 
-## Roadmap
+- Budget decisions depend on configured rates, estimated output and supported usage parsing; they do not guarantee the final provider bill.
+- The recorded example exercises price resolution only; it does not test live proxy traffic or account credentials.
+- Calls that bypass the proxy are outside its ledger and budget.
 
-- [x] **m1 — intercept &amp; log.** Local proxy transparently forwards `claude`/`codex` traffic, parses the `usage` block, writes per-cwd token + USD ledger. `fuse status` shows real numbers.
-- [x] **m2 — enforce hard-cap.** `.fuse.toml` parsing + `cap_usd` enforcement. Pre-flight estimate prevents single-request overshoot. HTTP 402 on deny. `fuse cap ±N` mutates atomically.
-- [x] **m3 — run launcher.** Named accounts in `~/.fuse/accounts.toml`, fingerprint matching, OpenAI provider parity. Stray `.env` keys cannot route traffic to the wrong account.
-- [x] **m4 — widen the wedge (v0.2).** Gemini + DeepSeek + OpenAI-compat handlers. tiktoken-go fallback for streams without upstream `usage`. Bundled `assets/prices.toml` with user-overridable `~/.fuse/prices.toml`.
-- [x] **v0.3 — fail-closed correctness.** Fixed streamed Anthropic + OpenAI responses that billed **$0** (SSE bodies were never parsed, so the cap never fired); per-side tiktoken fallback for partial usage; atomic `Reserve`/`CommitDelta` so concurrent requests can't overshoot the cap; cap-critical cost now routes through the user-overridable price table. Added a tiktoken accuracy harness and a read-only `fuse prices` introspection command.
+The current CLI includes multi-provider routing, budget reservations, price overrides and drift inspection. Future work should improve measured estimator accuracy and client compatibility. Cloud aggregation, SSO, alerts and a web management UI are outside the implemented CLI. See CHANGELOG.md for release details.
 
-Still out of scope: web UI, multi-user / SSO, cloud spend aggregation, fine-grained per-tool quotas, Slack / email alerts, Windows native (WSL2 only), and — non-negotiably — any remote price-fetch or telemetry call.
+## License and contributions
 
-## License &amp; contributing
-
-MIT — see [LICENSE](LICENSE). Issues and PRs welcome at [github.com/SuperMarioYL/agentfuse](https://github.com/SuperMarioYL/agentfuse). The fastest way to help right now: try the quickstart on a real overnight loop and file an issue when the kill-switch fires (or fails to).
-
----
-
-<p align="center"><sub>MIT © 2026 SuperMarioYL</sub></p>
+See [LICENSE](./LICENSE). When reporting an issue, include a minimal input, the command, and the observed output.

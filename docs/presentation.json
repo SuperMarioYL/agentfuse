@@ -1,0 +1,82 @@
+{
+  "name": "AgentFuse",
+  "tagline": "Give each agent project a spending boundary",
+  "architecture": {
+    "title": "A request gate around the child command",
+    "nodes": [
+      {
+        "title": "Launcher",
+        "detail": "internal/cli/run.go"
+      },
+      {
+        "title": "Proxy",
+        "detail": "account and provider handlers"
+      },
+      {
+        "title": "Ledger",
+        "detail": "atomic budget reservations"
+      },
+      {
+        "title": "Price resolver",
+        "detail": "bundled table and overrides"
+      }
+    ],
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ]
+    ]
+  },
+  "process": {
+    "title": "From input to a useful result",
+    "steps": [
+      {
+        "title": "Load snapshot",
+        "detail": "embedded price table"
+      },
+      {
+        "title": "Resolve model",
+        "detail": "prefix match or fallback"
+      },
+      {
+        "title": "Calculate cost",
+        "detail": "1000 input / 100 output"
+      }
+    ],
+    "result": "Two local model lookups; configured costs only, no API billing measurement."
+  },
+  "integrations": {
+    "title": "Supported input and output routes",
+    "items": [
+      {
+        "title": "Anthropic",
+        "detail": "Messages API handler"
+      },
+      {
+        "title": "OpenAI",
+        "detail": "Chat Completions and Responses"
+      },
+      {
+        "title": "Gemini",
+        "detail": "GenerateContent handlers"
+      },
+      {
+        "title": "DeepSeek / compatible",
+        "detail": "OpenAI-shaped API routes"
+      },
+      {
+        "title": "TOML + bbolt",
+        "detail": "configuration and local ledger"
+      }
+    ]
+  }
+}

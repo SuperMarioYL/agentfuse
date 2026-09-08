@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "source_revision": "beb1491dd30742c6822f78f77eed2b753b5c4f92",
+  "scope": "Local bundled-price resolution and configured cost arithmetic. No provider traffic or live spend.",
+  "steps": [
+    {
+      "label": "Recorded run",
+      "body": "Local bundled-price resolution and configured cost arithmetic. No provider traffic or live spend.",
+      "command": "go run ./examples/presentation",
+      "output": "Bundled price snapshot: 2026-05\nopenai/gpt-4o explicit=true input_per_1k=0.0025 output_per_1k=0.0100\n  configured cost for 1000 input + 100 output tokens: $0.0035\nopenai/unlisted-demo-model explicit=false input_per_1k=0.0050 output_per_1k=0.0200\n  configured cost for 1000 input + 100 output tokens: $0.0070\nScope: local price-table arithmetic; no provider request or measured spend."
+    }
+  ]
+}
