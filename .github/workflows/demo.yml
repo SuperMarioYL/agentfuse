@@ -25,7 +25,14 @@ jobs:
           sudo apt-get install -y ffmpeg
           sudo curl -fsSL -o /usr/local/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           sudo chmod +x /usr/local/bin/ttyd
-          go install github.com/charmbracelet/vhs@latest
+          # v0.14: fix-demo-workflow-detached-head-push — pin vhs to the last
+          # version that renders this tape (v0.11.0, the version the 2026-09-01
+          # v0.13.0 run used). vhs v0.12.0 (released 2026-09-09) prints
+          # "Creating assets/demo.gif..." and exits 0 in ~0.4s without writing
+          # any file, so `git add assets/demo.gif` then failed with "pathspec
+          # did not match any files" — the render must be reproducible, not
+          # floating with @latest (ttyd is pinned for the same reason).
+          go install github.com/charmbracelet/vhs@v0.11.0
       - name: Render demo.gif
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
