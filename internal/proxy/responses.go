@@ -174,3 +174,66 @@ func responsesOutputText(items []struct {
 func isOpenAIResponsesPath(p string) bool {
 	return p == "/v1/responses" || strings.HasPrefix(p, "/v1/responses/")
 }
+
+// responsesPromptText flattens a /v1/responses REQUEST body into one string
+// for tiktoken estimation. A Responses request carries its input under
+// `input` (a string OR an array of {role, content} items — content itself a
+// string or an array of {type,text} parts) plus a top-level `instructions`
+// string; NEITHER the Chat-Completions `messages` nor the legacy `prompt`
+// field exists. v0.14: fix-responses-prompt-fallback-empty-input —
+// openaiPromptText reads only messages/prompt, so a Responses request's
+// promptText was "" and the per-side input fallback billed
+// EstimatePrompt(model, "") = 0 tokens on a truncated/no-usage stream
+// (fail-open on the Codex path).
+func responsesPromptText(body []byte) string {
+	var req struct {
+		Instructions string `json:"instructions"`
+		Input        json.RawMessage
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return string(body)
+	}
+	var b strings.Builder
+	if req.Instructions != "" {
+		b.WriteString(req.Instructions)
+		b.WriteByte('\n')
+	}
+	// `input` is a plain string in the simple case...
+	var s string
+	if err := json.Unmarshal(req.Input, &s); err == nil {
+		b.WriteString(s)
+		return b.String()
+	}
+	// ...or an array of message items, each with content that is a string or
+	// an array of {type,text} parts (mirroring how openaiPromptText handles
+	// Chat-Completions message content).
+	var items []struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(req.Input, &items); err != nil {
+		return b.String()
+	}
+	for _, item := range items {
+		b.WriteString(item.Role)
+		b.WriteByte(':')
+		var cs string
+		if err := json.Unmarshal(item.Content, &cs); err == nil {
+			b.WriteString(cs)
+		} else {
+			var parts []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(item.Content, &parts); err == nil {
+				for _, p := range parts {
+					b.WriteString(p.Text)
+				}
+			} else {
+				b.Write(item.Content)
+			}
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}

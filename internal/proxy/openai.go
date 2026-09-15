@@ -21,6 +21,27 @@ type openaiRequest struct {
 	Model           string `json:"model"`
 	MaxTokens       int    `json:"max_tokens"`
 	MaxOutputTokens int    `json:"max_output_tokens"`
+	// MaxCompletionTokens is the current Chat-Completions max-output field
+	// (max_tokens is deprecated there; the o-series/gpt-5 models reject it).
+	// v0.14: fix-openai-max-completion-tokens-estimate.
+	MaxCompletionTokens int `json:"max_completion_tokens"`
+}
+
+// openaiMaxOutputTokens resolves the declared output ceiling across the three
+// wire generations: max_tokens (legacy Chat Completions) -> max_output_tokens
+// (Responses API) -> max_completion_tokens (current Chat Completions). 0 means
+// the client declared none and the estimate falls back to "completion ≈
+// prompt" (enforcer.go), which under-reserves when a real ceiling exists —
+// the reservation is what stops N concurrent requests collectively
+// overshooting the cap.
+func openaiMaxOutputTokens(req openaiRequest) int {
+	if req.MaxTokens != 0 {
+		return req.MaxTokens
+	}
+	if req.MaxOutputTokens != 0 {
+		return req.MaxOutputTokens
+	}
+	return req.MaxCompletionTokens
 }
 
 type openaiResponse struct {
@@ -72,12 +93,19 @@ func openaiHandler(s *Server) http.Handler {
 		var req openaiRequest
 		_ = json.Unmarshal(body, &req)
 
+		// v0.14: fix-responses-prompt-fallback-empty-input — a /v1/responses
+		// request carries its input under `input` (string or item array) +
+		// `instructions`, none of which openaiPromptText (Chat-Completions
+		// messages/prompt) reads — so the per-side input fallback below billed
+		// EstimatePrompt(model, "") = 0 tokens on a truncated/no-usage
+		// Responses stream (fail-open on the Codex path). Branch to the
+		// Responses-shaped extractor where response parsing already branches.
 		promptText := openaiPromptText(body)
-		promptTokens := estimatePromptTokens(body)
-		maxOut := req.MaxTokens
-		if maxOut == 0 {
-			maxOut = req.MaxOutputTokens
+		if isOpenAIResponsesPath(r.URL.Path) {
+			promptText = responsesPromptText(body)
 		}
+		promptTokens := estimatePromptTokens(body)
+		maxOut := openaiMaxOutputTokens(req)
 		estimate := budget.EstimateRequestWithProvider("openai", req.Model, promptTokens, maxOut)
 
 		// Atomic reserve so concurrent requests cannot collectively overshoot the cap.
@@ -161,7 +189,7 @@ func openaiHandler(s *Server) http.Handler {
 			var (
 				inTok, outTok  int
 				completionText string
-				parsedModel     string
+				parsedModel    string
 			)
 			if isOpenAIResponsesPath(r.URL.Path) {
 				inTok, outTok, completionText, parsedModel = parseOpenAIResponsesUsage(respBody)

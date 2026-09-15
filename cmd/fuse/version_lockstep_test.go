@@ -62,4 +62,47 @@ func TestVersionSurfacesLockstep(t *testing.T) {
 		t.Errorf("web/site.json changelog[0].version = %q, want %q "+
 			"(latest changelog entry lags VERSION)", site.Changelog[0].Version, "v"+want)
 	}
+
+	// v0.14: quality-changelog-lockstep-surface — CHANGELOG.md was one of the
+	// four drifted surfaces of the v0.12.0 release this test was written to
+	// guard, but the original check omitted it: a bump that touches VERSION +
+	// main.go + site.json while skipping CHANGELOG.md would pass. The latest
+	// `## [x.y.z]` heading must equal VERSION and the [Unreleased] section
+	// must stay empty (content there means a shipped change was never given a
+	// version section).
+	changelogBytes, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
+	if err != nil {
+		t.Fatalf("read CHANGELOG.md: %v", err)
+	}
+	var (
+		seenLatest   bool
+		inUnreleased bool
+	)
+	for _, line := range strings.Split(string(changelogBytes), "\n") {
+		switch {
+		case strings.HasPrefix(line, "## [Unreleased]"):
+			inUnreleased = true
+		case strings.HasPrefix(line, "## ["):
+			inUnreleased = false
+			if !seenLatest {
+				seenLatest = true
+				// Headings carry a date suffix: `## [0.14.0] — 2026-09-16`.
+				// Compare the bracketed version only.
+				end := strings.IndexByte(line, ']')
+				if end < 0 || line[:end+1] != "## ["+want+"]" {
+					t.Errorf("CHANGELOG.md latest section = %q, want a heading "+
+						"starting \"## [%s]\" (CHANGELOG lags VERSION)", line, want)
+				}
+			}
+		case inUnreleased:
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				t.Errorf("CHANGELOG.md [Unreleased] section is not empty: %q "+
+					"(shipped changes must land under a version section)", line)
+			}
+		}
+	}
+	if !seenLatest {
+		t.Fatal("CHANGELOG.md has no `## [x.y.z]` version section")
+	}
 }

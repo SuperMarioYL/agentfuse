@@ -224,8 +224,13 @@
       }
     ]
   },
-  "content_version": "v0.13.0",
+  "content_version": "v0.14.0",
   "changelog": [
+    {
+      "version": "v0.14.0",
+      "zh": "修复 Responses API 请求侧的输入兜底：此前 /v1/responses 请求的输入文本从未被提取（只解析 Chat Completions 的 messages/prompt 字段），截断的流式响应会把输入侧按 0 个 token 计费（fail-open）；现在 instructions 与 input（字符串或消息数组）都会进入 tiktoken 估算。同时解析 max_completion_tokens，让预检预留采用客户端声明的输出上限；修复 demo 工作流自 v0.4.0 起在每个标签上因 detached HEAD push 失败的问题；版本联动测试补上 CHANGELOG 面。",
+      "en": "Fixes the Responses-API request-side input fallback: /v1/responses request text was never extracted (only Chat Completions messages/prompt were parsed), so a truncated streamed response billed the input side as 0 tokens (fail-open); instructions and input (string or message array) now feed the tiktoken estimate. Also parses max_completion_tokens so the pre-flight reserve honors the client's declared output ceiling, fixes the demo workflow that failed on every tag since v0.4.0 (detached-HEAD push), and extends the version lockstep test to the CHANGELOG surface."
+    },
     {
       "version": "v0.13.0",
       "zh": "fuse --version 现在如实报告所发布标签的版本（v0.12.0 发布只改了处理器代码，VERSION、main.go 版本号与 CHANGELOG 全部滞留为 0.11.0，站点内容版本还停在更早的值）；同时补齐 OpenAI Responses API 单次返回里推理摘要文本的捕获，让准确度采样器在 o3/gpt-5 单次请求上测到诚实的估值。",

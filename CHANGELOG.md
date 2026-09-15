@@ -6,6 +6,55 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-09-16
+
+A fix-only release closing the four findings from the v0.14 grill bug-hunt of
+the shipped v0.13.0 source (origin/main had three docs-only commits past the
+tag; no product-code drift). The headline is the request-side twin of the
+v0.11 Responses fix: response parsing was widened to the Responses API but
+request parsing never was, so the input-side fallback billed 0 prompt tokens
+on truncated Codex streams. No net-new feature scope. Cold traction unchanged
+(2 stars / 0 forks / 0 open issues / 0 ever filed).
+
+### Fixed
+- **Truncated `/v1/responses` streams billed $0 input — fail-open**
+  (`internal/proxy/openai.go`, `internal/proxy/responses.go`,
+  fix-responses-prompt-fallback-empty-input): `openaiPromptText` extracts only
+  the Chat-Completions `messages[]` and legacy `prompt` fields, but a
+  `/v1/responses` request (the Codex CLI path the v0.11 fix targeted) carries
+  its input under `input` (a string OR an array of `{role, content}` items)
+  plus `instructions` — neither is read, so `promptText` was `""` for every
+  Responses request and the v0.10 per-side input fallback
+  (`if inTok == 0 { inTok = tokens.EstimatePrompt(model, promptText) }`)
+  billed `EstimatePrompt(model, "") = 0` input tokens. Reproduced at the tag
+  with both input variants; a truncated stream (relay closes before
+  `response.completed`) bills $0 input on a request whose real prompt is often
+  tens of thousands of tokens. `responsesPromptText` now flattens
+  `instructions` + `input`, branched where response parsing already branches.
+- **`max_completion_tokens` was ignored by the pre-flight reserve**
+  (`internal/proxy/openai.go`, fix-openai-max-completion-tokens-estimate):
+  `openaiRequest` parsed only `max_tokens`/`max_output_tokens`; the
+  Chat-Completions clients of today send `max_completion_tokens` (the only
+  max field o-series/gpt-5 accepts there), so the declared output ceiling
+  fell back to "completion ≈ prompt" and under-reserved the figure the
+  Reserve/CommitDelta guard uses to stop concurrent requests collectively
+  overshooting the cap. The chain now resolves max_tokens →
+  max_output_tokens → max_completion_tokens.
+- **The demo workflow failed on every tag since v0.4.0**
+  (`.github/workflows/demo.yml`, fix-demo-workflow-detached-head-push): the
+  "Commit rendered gif" step ran a bare `git push` from the detached-HEAD tag
+  checkout — `fatal: You are not currently on a branch.`, exit 128, after vhs
+  had successfully rendered the gif (10 consecutive tag failures, v0.4.0
+  through v0.13.0). The step now pushes `origin HEAD:main`.
+
+### Changed
+- **The version-lockstep test now also guards `CHANGELOG.md`**
+  (`cmd/fuse/version_lockstep_test.go`, quality-changelog-lockstep-surface):
+  CHANGELOG.md was one of the four drifted surfaces of the v0.12.0 release
+  but the only one the v0.13 lockstep test omitted; a bump skipping it would
+  have passed. The latest `## [x.y.z]` section must now equal `VERSION` and
+  the `[Unreleased]` section must stay empty.
+
 ## [0.13.0] — 2026-09-02
 
 A fix-only release closing the two findings from the v0.13 grill bug-hunt of

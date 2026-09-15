@@ -36,4 +36,9 @@ jobs:
           git config user.email "${{ github.actor }}@users.noreply.github.com"
           git add assets/demo.gif
           git commit -m "chore: render demo gif" || { echo "no change"; exit 0; }
-          git push
+          # v0.14: fix-demo-workflow-detached-head-push — this workflow runs on
+          # tag pushes, and actions/checkout checks the tag out as a DETACHED
+          # HEAD, so a bare `git push` failed with "fatal: You are not
+          # currently on a branch." (exit 128) on every tag since v0.4.0,
+          # discarding the rendered gif. Push the detached HEAD explicitly.
+          git push origin HEAD:main
