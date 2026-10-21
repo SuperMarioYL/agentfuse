@@ -6,6 +6,46 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-21
+
+A fix-only release closing the three findings from the v0.15 grill bug-hunt of
+the shipped v0.14.0 source (the only commit past the tag is the demo workflow's
+own `chore: render demo gif`, so there is no product-code drift). The headline is
+the half-done remainder of the v0.14 max_completion_tokens fix: the resolver was
+wired into the openai handler only, leaving deepseek and openai_compat
+under-reserving the concurrency guard. No net-new feature scope — GitHub demand
+is still absent (2 stars / 0 forks / 0 open issues / 0 ever filed).
+
+### Fixed
+- **`max_completion_tokens` was still ignored by the deepseek and openai_compat
+  pre-flight reserves** (`internal/proxy/deepseek.go`, `internal/proxy/openai_compat.go`,
+  fix-max-completion-tokens-lockstep): v0.14 added `openaiMaxOutputTokens`
+  (`max_tokens` → `max_output_tokens` → `max_completion_tokens`) but wired it into
+  `internal/proxy/openai.go` only. The other two Chat-Completions handlers kept the
+  old two-field inline chain, so a request whose only declared ceiling was
+  `max_completion_tokens` — the field the current client SDKs send — resolved to 0
+  and the estimate fell back to "completion ≈ prompt", shrinking the reservation
+  that stops concurrent requests from collectively overshooting the cap. All three
+  Chat-Completions handlers now share the resolver.
+- **`fuse init` wrote a `.fuse.toml` the rest of the CLI rejects**
+  (`cmd/fuse/main.go`, `internal/budget/config.go`,
+  fix-init-cap-nonpositive-unusable-config): `init` was the only writer that did
+  not validate its cap. `fuse init --cap 0` (or a negative) exited 0 and wrote
+  `cap_usd <= 0`, which `budget.Load` and `fuse cap` both reject — so every later
+  command in that project failed with `cap_usd must be > 0`, including
+  `fuse cap +5`, the remediation the budget-deny path itself prints, and `init`
+  refuses to overwrite the existing file. The cap>0 rule now has one owner
+  (`budget.ValidateCapUSD`, used by `Load` on read and `init` on write).
+- **Gemini's free `:countTokens` endpoint was reserved against and billed**
+  (`internal/proxy/gemini.go`, fix-gemini-counttokens-billed-and-reserved): the
+  endpoint returns `{"totalTokens": N}` — a count, with no `usageMetadata` and no
+  candidates — so the per-side fallback billed a fabricated
+  `promptTokens + EstimateCompletion(model,"")=100` and counted the request, and
+  the pre-flight reserve denied the free call outright once the project was at its
+  cap. `:countTokens` is now neither reserved against nor billed; the response is
+  still forwarded verbatim, and `:generateContent` / `:streamGenerateContent` keep
+  the atomic reserve and per-side fallback billing.
+
 ## [0.14.0] — 2026-09-16
 
 A fix-only release closing the four findings from the v0.14 grill bug-hunt of

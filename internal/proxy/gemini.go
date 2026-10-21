@@ -90,6 +90,16 @@ func geminiHandler(s *Server) http.Handler {
 		var req geminiRequest
 		_ = json.Unmarshal(body, &req)
 
+		// v0.15: fix-gemini-counttokens-billed-and-reserved — :countTokens is a
+		// free endpoint (Google does not charge for it) and its response carries
+		// only a `totalTokens` count, no usageMetadata and no candidates. Billing
+		// it through the per-side fallback charged a fabricated promptTokens +
+		// EstimateCompletion(model,"")=100 and incremented the request counter,
+		// and the pre-flight reserve denied the free call outright once the
+		// project was at its cap. Free traffic consumes no budget: neither
+		// reserve against the cap nor bill it.
+		billable := !isGeminiCountTokensPath(r.URL.Path)
+
 		promptText := geminiPromptText(&req)
 		promptTokens := tokens.EstimatePrompt(model, promptText)
 		maxOut := req.GenerationConfig.MaxOutputTokens
@@ -100,26 +110,28 @@ func geminiHandler(s *Server) http.Handler {
 		// path — the v0.3.0 Reserve/CommitDelta fix only landed in anthropic+openai,
 		// so 3/5 providers (deepseek/gemini/openai_compat) could still overshoot under
 		// concurrency. Now matches the atomic discipline of the other handlers.
-		allowed, err := s.led.ReserveWindowed(s.projectRoot, s.cfg.Window, s.cfg.CapUSD, estimate)
-		if err != nil {
-			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
-			return
-		}
-		if !allowed {
-			// v0.7: fix-concurrent-deny-empty-reason — format the deny reason
-			// from the projected total (persisted+reserved+estimate) the ledger
-			// already denied on, not a persisted-only WindowedTotal via Decide
-			// (which returns an empty Reason whenever reserved>0 drives the deny).
-			_, _, projected, _ := s.led.ProjectedTotal(s.projectRoot, s.cfg.Window, estimate)
-			decision := budget.DenyDecision(projected, s.cfg.CapUSD, estimate, s.projectRoot)
-			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
-				decision.Reason, decision.SuggestedCmd)
-			writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
-			return
+		if billable {
+			allowed, err := s.led.ReserveWindowed(s.projectRoot, s.cfg.Window, s.cfg.CapUSD, estimate)
+			if err != nil {
+				writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
+				return
+			}
+			if !allowed {
+				// v0.7: fix-concurrent-deny-empty-reason — format the deny reason
+				// from the projected total (persisted+reserved+estimate) the ledger
+				// already denied on, not a persisted-only WindowedTotal via Decide
+				// (which returns an empty Reason whenever reserved>0 drives the deny).
+				_, _, projected, _ := s.led.ProjectedTotal(s.projectRoot, s.cfg.Window, estimate)
+				decision := budget.DenyDecision(projected, s.cfg.CapUSD, estimate, s.projectRoot)
+				fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
+					decision.Reason, decision.SuggestedCmd)
+				writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
+				return
+			}
 		}
 		committed := false
 		defer func() {
-			if !committed {
+			if billable && !committed {
 				s.led.Release(s.projectRoot, estimate)
 			}
 		}()
@@ -155,8 +167,9 @@ func geminiHandler(s *Server) http.Handler {
 			return
 		}
 
-		// 5. Parse usage and update ledger (only on success).
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// 5. Parse usage and update ledger (only on success, and only for
+		// billable traffic — see the :countTokens note above).
+		if billable && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			inTok, outTok, completionText := parseGeminiUsage(respBody)
 			// Fall back per-side so a partial usage block (only one count present)
 			// does not under-bill the missing half.
@@ -178,6 +191,15 @@ func geminiHandler(s *Server) http.Handler {
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(respBody)
 	})
+}
+
+// isGeminiCountTokensPath reports whether the (prefix-stripped) request path
+// targets Gemini's :countTokens endpoint. That endpoint returns a token count
+// and is free of charge, so it must be neither reserved against the project cap
+// nor billed to the ledger — its response carries no usageMetadata/candidates,
+// so the per-side fallback would otherwise fabricate a charge for it.
+func isGeminiCountTokensPath(p string) bool {
+	return strings.HasSuffix(p, ":countTokens")
 }
 
 // geminiModelFromPath extracts "gemini-1.5-pro" from

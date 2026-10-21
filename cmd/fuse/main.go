@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.14.0"
+var version = "0.15.0"
 
 func main() {
 	root := &cobra.Command{
@@ -42,6 +42,15 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create a .fuse.toml in the current directory",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// v0.15: fix-init-cap-nonpositive-unusable-config — init is the only
+			// writer of .fuse.toml that did not validate its cap. `fuse init --cap 0`
+			// (or a negative) exited 0 and wrote a config budget.Load rejects, so
+			// every later command in that project failed with "cap_usd must be > 0"
+			// — including `fuse cap +5`, the remediation the deny path itself
+			// suggests — leaving no in-CLI recovery. Validate before writing.
+			if err := budget.ValidateCapUSD(capUSD); err != nil {
+				return err
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err

@@ -224,8 +224,13 @@
       }
     ]
   },
-  "content_version": "v0.14.0",
+  "content_version": "v0.15.0",
   "changelog": [
+    {
+      "version": "v0.15.0",
+      "zh": "修复三处计费与预留缺陷：deepseek 与 openai_compat 处理器此前忽略 max_completion_tokens（v0.14 只把三字段上限解析接进了 openai 处理器），客户端声明的输出上限会退回“补全≈提示”，使并发预留过小；`fuse init --cap 0`（或负数）会写出一个其余命令一律拒绝的 .fuse.toml 并以 0 退出，连它自己建议的 `fuse cap +5` 都无法恢复，现在 init 会在写入前校验上限；Gemini 免费的 :countTokens 端点此前会被预留并计费（按伪造的 100 个输出 token 计一次请求），预算耗尽时还会被直接拒绝，现在它既不预留也不计费，:generateContent 仍照常计费。",
+      "en": "Fixes three billing/reserve defects: the deepseek and openai_compat handlers ignored max_completion_tokens (v0.14 wired the three-field ceiling resolver into the openai handler only), so the client's declared output ceiling fell back to \"completion ≈ prompt\" and under-reserved the concurrency guard; `fuse init --cap 0` (or a negative) wrote a .fuse.toml that every other command rejects and exited 0, leaving even its own suggested `fuse cap +5` unable to recover — init now validates the cap before writing; and Gemini's free :countTokens endpoint was reserved against and billed (a fabricated 100 output tokens plus a counted request), and denied outright at the cap — it is now neither reserved nor billed, while :generateContent still bills normally."
+    },
     {
       "version": "v0.14.0",
       "zh": "修复 Responses API 请求侧的输入兜底：此前 /v1/responses 请求的输入文本从未被提取（只解析 Chat Completions 的 messages/prompt 字段），截断的流式响应会把输入侧按 0 个 token 计费（fail-open）；现在 instructions 与 input（字符串或消息数组）都会进入 tiktoken 估算。同时解析 max_completion_tokens，让预检预留采用客户端声明的输出上限；修复 demo 工作流自 v0.4.0 起在每个标签上因 detached HEAD push 失败的问题；版本联动测试补上 CHANGELOG 面。",

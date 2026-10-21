@@ -65,10 +65,13 @@ func deepseekHandler(s *Server) http.Handler {
 
 		promptText := openaiPromptText(body)
 		promptTokens := tokens.EstimatePrompt(model, promptText)
-		maxOut := req.MaxTokens
-		if maxOut == 0 {
-			maxOut = req.MaxOutputTokens
-		}
+		// v0.15: fix-max-completion-tokens-lockstep — v0.14 widened the
+		// declared-ceiling chain to include max_completion_tokens (the field the
+		// Chat-Completions clients of today send) but wired it into the openai
+		// handler only; this handler kept the two-field inline copy, so a
+		// request whose only ceiling was max_completion_tokens under-reserved
+		// (the ceiling fell back to "completion ≈ prompt"). Share the resolver.
+		maxOut := openaiMaxOutputTokens(req)
 		estimate := budget.EstimateRequestWithProvider("deepseek", model, promptTokens, maxOut)
 
 		// Atomic reserve so concurrent requests cannot collectively overshoot

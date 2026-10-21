@@ -57,10 +57,11 @@ func openaiCompatHandler(s *Server) http.Handler {
 
 		promptText := openaiPromptText(body)
 		promptTokens := tokens.EstimatePrompt(model, promptText)
-		maxOut := req.MaxTokens
-		if maxOut == 0 {
-			maxOut = req.MaxOutputTokens
-		}
+		// v0.15: fix-max-completion-tokens-lockstep — same missed third field as
+		// deepseek.go: the openai_compat hosts speak Chat Completions, so
+		// max_completion_tokens is a declared ceiling here too. Share the
+		// resolver instead of keeping a second two-field copy.
+		maxOut := openaiMaxOutputTokens(req)
 		estimate := budget.EstimateRequestWithProvider("openai_compat", model, promptTokens, maxOut)
 
 		// Atomic reserve so concurrent requests cannot collectively overshoot

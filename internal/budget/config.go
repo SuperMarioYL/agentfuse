@@ -45,6 +45,17 @@ func FindProjectRoot(start string) string {
 	}
 }
 
+// ValidateCapUSD is the single source of truth for the cap_usd > 0 rule: a
+// non-positive cap makes every handler deny (ReserveWindowed compares against
+// it) and Load refuses it, so a writer must never persist one. Load enforces it
+// on read and `fuse init` on write.
+func ValidateCapUSD(v float64) error {
+	if v <= 0 {
+		return fmt.Errorf("cap_usd must be > 0 (got %.2f)", v)
+	}
+	return nil
+}
+
 // Load reads the .fuse.toml at the given project root directory.
 func Load(projectRoot string) (*Config, error) {
 	path := filepath.Join(projectRoot, FileName)
@@ -61,8 +72,8 @@ func Load(projectRoot string) (*Config, error) {
 	if cfg.Provider == "" {
 		cfg.Provider = "anthropic"
 	}
-	if cfg.CapUSD <= 0 {
-		return nil, fmt.Errorf("cap_usd must be > 0 (got %.2f)", cfg.CapUSD)
+	if err := ValidateCapUSD(cfg.CapUSD); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }
