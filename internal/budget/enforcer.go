@@ -137,11 +137,47 @@ func SetPriceTable(t *prices.Table) {
 // when the table can't be loaded — the kill-switch must never panic during
 // cost compute.
 func CostFromUsageWithProvider(provider, model string, inputTokens, outputTokens int) float64 {
+	e := priceEntry(provider, model)
+	return float64(inputTokens)*e.InputUSDPer1K/1000.0 +
+		float64(outputTokens)*e.OutputUSDPer1K/1000.0
+}
+
+// Prompt-cache multipliers applied to a model's input rate. Anthropic is the
+// only supported provider whose usage block reports cached input SEPARATELY from
+// input_tokens, and it bills a 5-minute cache write at 1.25x and a cache read at
+// 0.1x the base input rate. The counters we read do not distinguish the 1-hour
+// cache-write tier (priced higher), so the write side is a lower bound, not an
+// exact figure.
+const (
+	CacheWriteMultiplier = 1.25
+	CacheReadMultiplier  = 0.1
+)
+
+// CostFromAnthropicUsage prices an Anthropic Messages usage block, including the
+// two prompt-cache counters that input_tokens excludes. Billing only
+// input/output drops that spend entirely; for a cached turn the omitted cache
+// read alone can dominate the real cost, which is a fail-open (realized spend
+// can pass the cap without tripping it).
+func CostFromAnthropicUsage(model string, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens int) float64 {
+	e := priceEntry("anthropic", model)
+	inRate := e.InputUSDPer1K / 1000.0
+	return float64(inputTokens)*inRate +
+		float64(cacheWriteTokens)*CacheWriteMultiplier*inRate +
+		float64(cacheReadTokens)*CacheReadMultiplier*inRate +
+		float64(outputTokens)*e.OutputUSDPer1K/1000.0
+}
+
+// priceEntry resolves the per-1k rates for (provider, model) from the merged
+// table, falling back to the v0.1 static table when it cannot be loaded so cost
+// compute never panics on an unreadable prices.toml.
+func priceEntry(provider, model string) prices.Entry {
 	t, err := PriceTable()
 	if err != nil || t == nil {
-		return CostFromUsage(model, inputTokens, outputTokens)
+		p := PriceFor(model)
+		return prices.Entry{InputUSDPer1K: p.InputPer1M / 1000.0, OutputUSDPer1K: p.OutputPer1M / 1000.0}
 	}
-	return t.Cost(provider, model, inputTokens, outputTokens)
+	e, _ := t.Lookup(provider, model)
+	return e
 }
 
 // EstimateRequestWithProvider mirrors EstimateRequest but consults the

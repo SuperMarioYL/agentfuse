@@ -98,15 +98,15 @@ func TestAnthropicStreamingBillsLedger(t *testing.T) {
 func TestParseAnthropicUsage_UnaryAndStream(t *testing.T) {
 	// Unary JSON.
 	unary := []byte(`{"model":"claude-sonnet-4","usage":{"input_tokens":100,"output_tokens":50}}`)
-	in, out, _, model := parseAnthropicUsage(unary)
-	if in != 100 || out != 50 || model != "claude-sonnet-4" {
-		t.Fatalf("unary parse wrong: in=%d out=%d model=%s", in, out, model)
+	u, _, model := parseAnthropicUsage(unary)
+	if u.in != 100 || u.out != 50 || model != "claude-sonnet-4" {
+		t.Fatalf("unary parse wrong: in=%d out=%d model=%s", u.in, u.out, model)
 	}
 
 	// Stream.
-	in, out, text, model := parseAnthropicUsage([]byte(anthropicSSEBody))
-	if in != 1200 || out != 620 {
-		t.Fatalf("stream usage wrong: in=%d out=%d (want 1200/620)", in, out)
+	u, text, model := parseAnthropicUsage([]byte(anthropicSSEBody))
+	if u.in != 1200 || u.out != 620 {
+		t.Fatalf("stream usage wrong: in=%d out=%d (want 1200/620)", u.in, u.out)
 	}
 	if model != "claude-sonnet-4" {
 		t.Fatalf("stream model wrong: %s", model)
@@ -337,7 +337,7 @@ func TestAnthropicThinkingDeltaCaptured(t *testing.T) {
 	// Output side must be the EstimateCompletion of visible + reasoning text.
 	// Extract the exact accumulated text the same way the handler does so the
 	// assertion is exact, not a magic number.
-	_, _, completionText, _ := parseAnthropicUsage([]byte(anthropicThinkingSSEBody))
+	_, completionText, _ := parseAnthropicUsage([]byte(anthropicThinkingSSEBody))
 	if !strings.Contains(completionText, "Let me reason carefully") {
 		t.Fatalf("accumulated completion text dropped the thinking trace: %q", completionText)
 	}

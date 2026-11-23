@@ -31,6 +31,12 @@ type anthropicResponse struct {
 	Usage struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
+		// Anthropic reports prompt-cache traffic as counters SEPARATE from
+		// input_tokens (which excludes cached tokens); they are billed at 1.25x
+		// (write) / 0.1x (read) the input rate. v0.16:
+		// fix-anthropic-cache-tokens-dropped.
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 	Model   string `json:"model"`
 	Content []struct {
@@ -78,29 +84,36 @@ func anthropicHandler(s *Server) http.Handler {
 		// 3. Enforce — atomically reserve the estimate so concurrent requests
 		// cannot all pass the cap check and collectively overshoot. On any exit
 		// path below we MUST release or commit the reservation exactly once.
-		allowed, err := s.led.ReserveWindowed(s.projectRoot, s.cfg.Window, s.cfg.CapUSD, estimate)
-		if err != nil {
-			writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
-			return
-		}
-		if !allowed {
-			// Fail-closed — stderr line + HTTP 402 with JSON body.
-			// v0.7: fix-concurrent-deny-empty-reason — format the deny reason
-			// from the projected total (persisted+reserved+estimate) the ledger
-			// already denied on, not a persisted-only WindowedTotal via Decide
-			// (which returns an empty Reason whenever reserved>0 drives the deny).
-			_, _, projected, _ := s.led.ProjectedTotal(s.projectRoot, s.cfg.Window, estimate)
-			decision := budget.DenyDecision(projected, s.cfg.CapUSD, estimate, s.projectRoot)
-			fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
-				decision.Reason, decision.SuggestedCmd)
-			writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
-			return
+		// v0.16: fix-anthropic-counttokens-billed-and-reserved — /v1/messages/
+		// count_tokens is a free endpoint (its response is a token count, with no
+		// usage block), so it must be neither reserved against the cap nor billed;
+		// v0.15 made the same call for Gemini's :countTokens.
+		billable := !isAnthropicCountTokensPath(r.URL.Path)
+		if billable {
+			allowed, err := s.led.ReserveWindowed(s.projectRoot, s.cfg.Window, s.cfg.CapUSD, estimate)
+			if err != nil {
+				writeFuseError(w, http.StatusInternalServerError, "ledger reserve: "+err.Error(), "")
+				return
+			}
+			if !allowed {
+				// Fail-closed — stderr line + HTTP 402 with JSON body.
+				// v0.7: fix-concurrent-deny-empty-reason — format the deny reason
+				// from the projected total (persisted+reserved+estimate) the ledger
+				// already denied on, not a persisted-only WindowedTotal via Decide
+				// (which returns an empty Reason whenever reserved>0 drives the deny).
+				_, _, projected, _ := s.led.ProjectedTotal(s.projectRoot, s.cfg.Window, estimate)
+				decision := budget.DenyDecision(projected, s.cfg.CapUSD, estimate, s.projectRoot)
+				fmt.Fprintf(os.Stderr, "agentfuse: %s — raise with: %s\n",
+					decision.Reason, decision.SuggestedCmd)
+				writeFuseError(w, http.StatusPaymentRequired, decision.Reason, decision.SuggestedCmd)
+				return
+			}
 		}
 		// committed flips true once the reservation is reconciled via CommitDelta;
 		// any earlier return Releases it so it can't leak.
 		committed := false
 		defer func() {
-			if !committed {
+			if billable && !committed {
 				s.led.Release(s.projectRoot, estimate)
 			}
 		}()
@@ -141,14 +154,15 @@ func anthropicHandler(s *Server) http.Handler {
 			return
 		}
 
-		// 5. Parse usage and update ledger (only on success). Anthropic streaming
+		// 5. Parse usage and update ledger (only on success, and only for
+		// billable traffic — see the count_tokens note above). Anthropic streaming
 		// (the Claude Code default) returns an SSE body, not one JSON object, so a
 		// single json.Unmarshal of the whole body fails and the request would bill
 		// $0 — letting streamed spend bypass the cap. parseAnthropicUsage handles
 		// BOTH the unary JSON response and the SSE event stream, and we fall back
 		// to a local tiktoken estimate when no usage block is present at all.
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			inTok, outTok, completionText, parsedModel := parseAnthropicUsage(respBody)
+		if billable && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			usage, completionText, parsedModel := parseAnthropicUsage(respBody)
 			model := parsedModel
 			if model == "" {
 				model = req.Model
@@ -163,9 +177,9 @@ func anthropicHandler(s *Server) http.Handler {
 			// v0.5.0: guard on completionText != "" so an empty completion does not
 			// record EstimateCompletion(model, "")=100 and false-trigger the kill
 			// criterion.
-			if inTok > 0 && outTok > 0 && completionText != "" {
+			if usage.in > 0 && usage.out > 0 && completionText != "" {
 				tokens.RecordSample("anthropic", model,
-					tokens.EstimateCompletion(model, completionText), outTok)
+					tokens.EstimateCompletion(model, completionText), usage.out)
 			}
 			// v0.10: fix-anthropic-openai-partial-usage-bothzero-fallback — fall
 			// back per-side, not on a both-zero guard. Anthropic streaming splits
@@ -179,14 +193,19 @@ func anthropicHandler(s *Server) http.Handler {
 			// output) — fail-open: realized spend can exceed the cap without
 			// tripping it. Estimate each missing side independently, mirroring
 			// deepseek.go:143-148 / gemini.go:163-168 / openai_compat.go:132-141.
-			if inTok == 0 {
-				inTok = tokens.EstimatePrompt(model, promptText)
+			if usage.in == 0 {
+				usage.in = tokens.EstimatePrompt(model, promptText)
 			}
-			if outTok == 0 {
-				outTok = tokens.EstimateCompletion(model, completionText)
+			if usage.out == 0 {
+				usage.out = tokens.EstimateCompletion(model, completionText)
 			}
-			usd := budget.CostFromUsageWithProvider("anthropic", model, inTok, outTok)
-			if _, err := s.led.CommitDelta(s.projectRoot, estimate, inTok, outTok, usd); err != nil {
+			// v0.16: fix-anthropic-cache-tokens-dropped — bill the prompt-cache
+			// counters at their published multipliers and record the full input
+			// token count (input + cache write + cache read), not just the
+			// uncached remainder.
+			usd := budget.CostFromAnthropicUsage(model, usage.in, usage.out, usage.cacheWrite, usage.cacheRead)
+			ledgerIn := usage.in + usage.cacheWrite + usage.cacheRead
+			if _, err := s.led.CommitDelta(s.projectRoot, estimate, ledgerIn, usage.out, usd); err != nil {
 				fmt.Fprintf(os.Stderr, "agentfuse: ledger update failed: %v\n", err)
 			}
 			committed = true
@@ -212,6 +231,10 @@ type anthropicStreamEvent struct {
 		Usage *struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
+			// v0.16: fix-anthropic-cache-tokens-dropped — same two counters as
+			// the unary Usage block; message_start carries them.
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
 	Delta *struct {
@@ -221,36 +244,56 @@ type anthropicStreamEvent struct {
 	Usage *struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
+		// v0.16: fix-anthropic-cache-tokens-dropped — some relays re-emit the
+		// cache counters on message_delta rather than message_start.
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"` // message_delta
 }
 
-// parseAnthropicUsage returns (inputTokens, outputTokens, completionText, model).
-// It handles BOTH a unary JSON response and an SSE event-stream body. For the
-// stream path it walks every `data: { ... }` line, accumulates content_block_delta
-// text, and takes the last input/output token counts it sees (message_start for
-// input, message_delta for output).
-func parseAnthropicUsage(body []byte) (int, int, string, string) {
+// anthropicUsage is the token usage a Messages response reports. The cache
+// counters are separate from in (input_tokens excludes cached prompt tokens);
+// they are carried through so the billing layer can price them at their own
+// multipliers instead of dropping that spend.
+type anthropicUsage struct {
+	in, out               int
+	cacheWrite, cacheRead int
+}
+
+// parseAnthropicUsage returns (usage, completionText, model). It handles BOTH a
+// unary JSON response and an SSE event-stream body. For the stream path it walks
+// every `data: { ... }` line, accumulates content_block_delta text, and takes the
+// last non-zero token count it sees for each side (message_start for the input
+// and cache counters, message_delta for output).
+func parseAnthropicUsage(body []byte) (anthropicUsage, string, string) {
 	// Unary path: try as one JSON object first.
 	var unary anthropicResponse
 	if err := json.Unmarshal(body, &unary); err == nil &&
-		(unary.Usage.InputTokens > 0 || unary.Usage.OutputTokens > 0 || unary.Model != "") {
-		if unary.Usage.InputTokens > 0 || unary.Usage.OutputTokens > 0 {
+		(unary.Usage.InputTokens > 0 || unary.Usage.OutputTokens > 0 ||
+			unary.Usage.CacheCreationInputTokens > 0 || unary.Usage.CacheReadInputTokens > 0 ||
+			unary.Model != "") {
+		u := anthropicUsage{
+			in:         unary.Usage.InputTokens,
+			out:        unary.Usage.OutputTokens,
+			cacheWrite: unary.Usage.CacheCreationInputTokens,
+			cacheRead:  unary.Usage.CacheReadInputTokens,
+		}
+		if u.in > 0 || u.out > 0 || u.cacheWrite > 0 || u.cacheRead > 0 {
 			// v0.5.0: fix-accuracy-harness-empty-completion-unary — the unary
 			// branch previously returned "" for completionText, so RecordSample
 			// measured EstimateCompletion(model, "")=100 on every unary response
 			// regardless of real completion length, false-triggering the §8 >25%
 			// kill criterion. Extract the content-block text so the harness
 			// measures a real estimate on unary traffic too.
-			return unary.Usage.InputTokens, unary.Usage.OutputTokens,
-				anthropicContentText(unary.Content), unary.Model
+			return u, anthropicContentText(unary.Content), unary.Model
 		}
 	}
 
 	// Stream path.
 	var (
-		inTok, outTok int
-		text          strings.Builder
-		model         string
+		u     anthropicUsage
+		text  strings.Builder
+		model string
 	)
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimSpace(line)
@@ -269,10 +312,16 @@ func parseAnthropicUsage(body []byte) (int, int, string, string) {
 			}
 			if ev.Message.Usage != nil {
 				if ev.Message.Usage.InputTokens > 0 {
-					inTok = ev.Message.Usage.InputTokens
+					u.in = ev.Message.Usage.InputTokens
 				}
 				if ev.Message.Usage.OutputTokens > 0 {
-					outTok = ev.Message.Usage.OutputTokens
+					u.out = ev.Message.Usage.OutputTokens
+				}
+				if ev.Message.Usage.CacheCreationInputTokens > 0 {
+					u.cacheWrite = ev.Message.Usage.CacheCreationInputTokens
+				}
+				if ev.Message.Usage.CacheReadInputTokens > 0 {
+					u.cacheRead = ev.Message.Usage.CacheReadInputTokens
 				}
 			}
 		}
@@ -293,14 +342,29 @@ func parseAnthropicUsage(body []byte) (int, int, string, string) {
 		}
 		if ev.Usage != nil {
 			if ev.Usage.InputTokens > 0 {
-				inTok = ev.Usage.InputTokens
+				u.in = ev.Usage.InputTokens
 			}
 			if ev.Usage.OutputTokens > 0 {
-				outTok = ev.Usage.OutputTokens
+				u.out = ev.Usage.OutputTokens
+			}
+			if ev.Usage.CacheCreationInputTokens > 0 {
+				u.cacheWrite = ev.Usage.CacheCreationInputTokens
+			}
+			if ev.Usage.CacheReadInputTokens > 0 {
+				u.cacheRead = ev.Usage.CacheReadInputTokens
 			}
 		}
 	}
-	return inTok, outTok, text.String(), model
+	return u, text.String(), model
+}
+
+// isAnthropicCountTokensPath reports whether the (prefix-stripped) request path
+// targets Anthropic's token-counting endpoint (POST /v1/messages/count_tokens).
+// Its response is a token count with no usage block and Anthropic does not bill
+// it, so it must be neither reserved against the cap nor billed — the same rule
+// v0.15 applied to Gemini's :countTokens.
+func isAnthropicCountTokensPath(p string) bool {
+	return strings.HasSuffix(p, "/messages/count_tokens")
 }
 
 // anthropicContentText flattens the content blocks of a unary Anthropic

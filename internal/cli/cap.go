@@ -60,7 +60,7 @@ func applyCapDelta(current float64, arg string) (float64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("parse delta %q: %w", arg, err)
 		}
-		return roundCents(current + n), nil
+		return roundedCap(current + n)
 	case '-':
 		n, err := strconv.ParseFloat(strings.TrimSpace(arg[1:]), 64)
 		if err != nil {
@@ -70,7 +70,7 @@ func applyCapDelta(current float64, arg string) (float64, error) {
 		if v <= 0 {
 			return 0, fmt.Errorf("cap would drop to $%.2f — must stay > $0", v)
 		}
-		return roundCents(v), nil
+		return roundedCap(v)
 	case '=':
 		n, err := strconv.ParseFloat(strings.TrimSpace(arg[1:]), 64)
 		if err != nil {
@@ -79,7 +79,7 @@ func applyCapDelta(current float64, arg string) (float64, error) {
 		if n <= 0 {
 			return 0, fmt.Errorf("cap must be > $0 (got %.2f)", n)
 		}
-		return roundCents(n), nil
+		return roundedCap(n)
 	default:
 		n, err := strconv.ParseFloat(arg, 64)
 		if err != nil {
@@ -88,8 +88,22 @@ func applyCapDelta(current float64, arg string) (float64, error) {
 		if n <= 0 {
 			return 0, fmt.Errorf("cap must be > $0 (got %.2f)", n)
 		}
-		return roundCents(n), nil
+		return roundedCap(n)
 	}
+}
+
+// roundedCap converts a candidate cap to the stored, cent-rounded value and
+// refuses one that rounding floors to $0.00. The pre-rounding guards above only
+// reject values that are already non-positive, so `fuse cap =0.001` (or
+// `-4.999`) passed them and returned 0 — a .fuse.toml budget.Load rejects.
+// Persisting it would strand the project: init refuses to overwrite, and the
+// deny path's own suggested `fuse cap +5` could not load the config either.
+func roundedCap(v float64) (float64, error) {
+	r := roundCents(v)
+	if err := budget.ValidateCapUSD(r); err != nil {
+		return 0, fmt.Errorf("cap rounds to $%.2f — %w", r, err)
+	}
+	return r, nil
 }
 
 func roundCents(v float64) float64 {

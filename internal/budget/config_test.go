@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,78 @@ func TestLoadAcceptsDailyAndProjectWindows(t *testing.T) {
 		}
 		if cfg.Window != c.want {
 			t.Fatalf("window=%q: got %q want %q", c.in, cfg.Window, c.want)
+		}
+	}
+}
+
+// TestSaveRejectsNonPositiveCap is the v0.16 regression for
+// fix-cap-rounds-to-zero-unusable-config (writer half). `fuse cap` is the second
+// writer of .fuse.toml, and it rounded a nominally positive cap (e.g. =0.001 or
+// -4.999) to $0.00 before saving. Save is the config module's own write choke
+// point, so it must refuse any config Load would reject instead of persisting a
+// file that strands the project.
+func TestSaveRejectsNonPositiveCap(t *testing.T) {
+	for _, cap := range []float64{0, -3} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, FileName)
+		if err := Save(path, &Config{CapUSD: cap, Window: "project"}); err == nil {
+			t.Fatalf("Save(cap_usd=%v) succeeded; budget.Load rejects that file", cap)
+		}
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("Save(cap_usd=%v) left a .fuse.toml behind that Load rejects", cap)
+		}
+	}
+}
+
+// TestLoadRejectsUnknownProvider is the v0.16 regression for
+// fix-unknown-provider-silently-unmonitored. `fuse run` routes on Config.Provider
+// with a five-case switch and no fallback, so a misspelled provider (e.g.
+// "googel") loads without error, sets no provider base URL, and the agent CLI
+// then talks straight to the provider — around the proxy, the ledger and the cap.
+func TestLoadRejectsUnknownProvider(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	body := "cap_usd = 5.0\nprovider = \"googel\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal(`Load accepted provider = "googel"; the launcher has no route for it`)
+	}
+	for _, name := range []string{"anthropic", "openai", "gemini", "deepseek", "openai_compat"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error does not name the valid provider %q: %v", name, err)
+		}
+	}
+}
+
+// TestLoadAcceptsEveryRoutableProvider asserts the validated set is exactly what
+// internal/cli/run.go routes (plus the empty -> anthropic default).
+func TestLoadAcceptsEveryRoutableProvider(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "anthropic"},
+		{"anthropic", "anthropic"},
+		{"openai", "openai"},
+		{"gemini", "gemini"},
+		{"deepseek", "deepseek"},
+		{"openai_compat", "openai_compat"},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		body := "cap_usd = 5.0\n"
+		if c.in != "" {
+			body += fmt.Sprintf("provider = %q\n", c.in)
+		}
+		if err := os.WriteFile(filepath.Join(dir, FileName), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("provider=%q: expected load to succeed, got %v", c.in, err)
+		}
+		if cfg.Provider != c.want {
+			t.Fatalf("provider=%q: got %q want %q", c.in, cfg.Provider, c.want)
 		}
 	}
 }

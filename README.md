@@ -19,7 +19,7 @@ An autonomous coding session can make many API calls before you inspect the bill
 
 - **Project or daily windows** — Choose a cumulative project cap or a window that resets at local midnight.
 - **Inspect the estimate** — Read bundled prices, overrides, unknown-model fallbacks and overlay drift without making a provider call.
-- **Keep a local ledger** — bbolt stores request counts, token usage and configured dollar costs for status reporting.
+- **Keep a local ledger** — bbolt stores request counts, token usage (including Anthropic prompt-cache counters) and configured dollar costs for status reporting.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ An autonomous coding session can make many API calls before you inspect the bill
   <img src="./assets/presentation/architecture-light.svg" width="960" alt="Architecture diagram">
 </picture>
 
-The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.
+The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation, including Anthropic's prompt-cache counters; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.
 
 | Component | Responsibility |
 | --- | --- |
@@ -122,6 +122,7 @@ The provider handlers translate request and response shapes; your selected clien
 ## Limits and next steps
 
 - Budget decisions depend on configured rates, estimated output and supported usage parsing; they do not guarantee the final provider bill.
+- Anthropic prompt-cache tokens are priced with the 5-minute cache rates; the 1-hour cache-write tier is not distinguished, so that side is a lower bound.
 - The recorded example exercises price resolution only; it does not test live proxy traffic or account credentials.
 - Calls that bypass the proxy are outside its ledger and budget.
 

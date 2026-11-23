@@ -6,6 +6,59 @@ All notable changes to AgentFuse are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-24
+
+A fix-only release closing the four findings from the v0.16 grill bug-hunt of
+the shipped v0.15.0 source (the only commit past the tag is the demo workflow's
+own `chore: render demo gif`, so there is no product-code drift). Two are
+billing-correctness fail-opens on the Anthropic path — prompt-cache tokens were
+never billed, and a free endpoint was both reserved and charged — and two close
+config-layer holes: `fuse cap` could persist a rounded-to-zero cap, and a
+misspelled `provider` routed the agent around the proxy entirely. No net-new
+feature scope: GitHub demand is still absent (2 stars / 0 forks / 0 open issues /
+0 ever filed).
+
+### Fixed
+- **Anthropic prompt-cache tokens were dropped from the billed input**
+  (`internal/proxy/anthropic.go`, `internal/budget/enforcer.go`,
+  fix-anthropic-cache-tokens-dropped): Anthropic reports
+  `cache_creation_input_tokens` and `cache_read_input_tokens` as counters
+  separate from `input_tokens` (which excludes cached tokens), priced at 1.25x
+  (5-minute cache write) and 0.1x (cache read) the input rate. The handler parsed
+  only input/output, so a cached turn — the Claude Code default — recorded a
+  fraction of its real cost: a response with `input_tokens: 10`,
+  `output_tokens: 100`, `cache_read_input_tokens: 90000` and
+  `cache_creation_input_tokens: 4000` billed $0.0015 instead of ~$0.0435, leaving
+  realized spend free to exceed the cap without tripping it. Both counters are
+  now parsed for unary and SSE bodies, the ledger records the full input token
+  count, and `budget.CostFromAnthropicUsage` applies the multipliers. The
+  counters we read do not distinguish the 1-hour cache-write tier (priced
+  higher), so the write side is a lower bound.
+- **Anthropic's free `/v1/messages/count_tokens` was reserved against the cap and
+  billed** (`internal/proxy/anthropic.go`,
+  fix-anthropic-counttokens-billed-and-reserved): the endpoint returns a token
+  count with no usage block, so the per-side fallback billed a fabricated
+  `promptTokens + 100` output tokens, counted the request, and the pre-flight
+  reserve denied the free call outright once the project was at its ceiling. It is
+  now neither reserved nor billed (the response is still forwarded verbatim),
+  mirroring the v0.15 fix for Gemini's `:countTokens`.
+- **`fuse cap` could round a positive cap to $0.00 and persist a `.fuse.toml` the
+  rest of the CLI rejects** (`internal/cli/cap.go`, `internal/budget/config.go`,
+  fix-cap-rounds-to-zero-unusable-config): `applyCapDelta` validated the
+  pre-rounding value, so `fuse cap =0.001` (likewise `0.001` and `-4.999`) passed
+  the guard, rounded to $0.00 and exited 0 — writing `cap_usd = 0`, which
+  `budget.Load` rejects. Every later command then failed, including the deny
+  path's own suggested `fuse cap +5`, and `init` refuses to overwrite an existing
+  file. The rounded value is now validated, and `budget.Save` refuses any cap
+  `ValidateCapUSD` rejects so no writer can persist an unloadable config.
+- **A misspelled `provider` loaded without error and the agent talked straight to
+  the provider** (`internal/budget/config.go`,
+  fix-unknown-provider-silently-unmonitored): `budget.Load` validated `window`
+  against its closed set but accepted any `provider`. The launcher routes on that
+  value with no fallback, so `provider = "googel"` set no provider base URL and
+  the child used its own default endpoint — no reservation, no ledger row, no cap.
+  `budget.ValidateProvider` now enforces the five routable names at load.
+
 ## [0.15.0] — 2026-10-21
 
 A fix-only release closing the three findings from the v0.15 grill bug-hunt of

@@ -50,8 +50,8 @@
         "zh": "保留本地账本"
       },
       "body": {
-        "en": "bbolt stores request counts, token usage and configured dollar costs for status reporting.",
-        "zh": "bbolt 保存请求数、Token 用量和按配置计算的费用，供 status 查询。"
+        "en": "bbolt stores request counts, token usage (including Anthropic prompt-cache counters) and configured dollar costs for status reporting.",
+        "zh": "bbolt 保存请求数、Token 用量（含 Anthropic 提示缓存计数）和按配置计算的费用，供 status 查询。"
       }
     }
   ],
@@ -108,6 +108,10 @@
       "zh": "预算决策依赖配置价格、输出估算和支持的用量解析，不能保证服务商最终账单金额。"
     },
     {
+      "en": "Anthropic prompt-cache tokens are priced with the 5-minute cache rates; the 1-hour cache-write tier is not distinguished, so that side is a lower bound.",
+      "zh": "Anthropic 提示缓存按 5 分钟缓存费率计算；1 小时缓存写入档位无法区分，因此该部分只是下限。"
+    },
+    {
       "en": "The recorded example exercises price resolution only; it does not test live proxy traffic or account credentials.",
       "zh": "记录的示例仅运行价格解析，没有验证在线代理流量或账户凭据。"
     },
@@ -139,8 +143,8 @@
           "zh": "处理过程"
         },
         "body": {
-          "en": "The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.",
-          "zh": "启动器为子命令改写服务商基础 URL。代理检查账户并在 bbolt 账本中预留预算，再通过对应协议处理器转发请求。返回用量用于结算预留费用；支持的用量缺失场景由本地 Token 估算补充。价格解析器统一处理模型前缀匹配和覆盖优先级。"
+          "en": "The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation, including Anthropic's prompt-cache counters; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.",
+          "zh": "启动器为子命令改写服务商基础 URL。代理检查账户并在 bbolt 账本中预留预算，再通过对应协议处理器转发请求。返回用量用于结算预留费用，其中包含 Anthropic 的提示缓存计数；支持的用量缺失场景由本地 Token 估算补充。价格解析器统一处理模型前缀匹配和覆盖优先级。"
         },
         "image": {
           "light": "/assets/presentation/process-light.svg",
@@ -161,8 +165,8 @@
           "zh": "围绕子命令的请求检查"
         },
         "body": {
-          "en": "The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.",
-          "zh": "启动器为子命令改写服务商基础 URL。代理检查账户并在 bbolt 账本中预留预算，再通过对应协议处理器转发请求。返回用量用于结算预留费用；支持的用量缺失场景由本地 Token 估算补充。价格解析器统一处理模型前缀匹配和覆盖优先级。"
+          "en": "The launcher rewrites provider base URLs for its child. The proxy applies account checks and reserves budget in the bbolt ledger, then sends accepted requests through the provider handler. Usage from the response reconciles the reservation, including Anthropic's prompt-cache counters; local token estimation covers supported missing-usage cases. The price resolver owns model-prefix lookup and override precedence.",
+          "zh": "启动器为子命令改写服务商基础 URL。代理检查账户并在 bbolt 账本中预留预算，再通过对应协议处理器转发请求。返回用量用于结算预留费用，其中包含 Anthropic 的提示缓存计数；支持的用量缺失场景由本地 Token 估算补充。价格解析器统一处理模型前缀匹配和覆盖优先级。"
         },
         "image": {
           "light": "/assets/presentation/architecture-light.svg",
@@ -224,8 +228,13 @@
       }
     ]
   },
-  "content_version": "v0.15.0",
+  "content_version": "v0.16.0",
   "changelog": [
+    {
+      "version": "v0.16.0",
+      "zh": "修复四处计费与配置缺陷：Anthropic 的提示缓存计数此前完全未计费（缓存读取 90000 + 缓存写入 4000 的请求只记 $0.0015，实际约 $0.0435），现在按 1.25 倍/0.1 倍输入费率结算并记录完整输入 Token；免费的 /v1/messages/count_tokens 此前会被预留并计费（按伪造的 100 个输出 Token），预算耗尽时还会被直接拒绝，现在既不预留也不计费；`fuse cap =0.001` 这类正数上限四舍五入成 $0.00 后会写入无法加载的 .fuse.toml，现在会在写入前拒绝；provider 拼写错误（如 googel）此前能正常加载并让客户端绕过代理直连服务商，现在加载即报错并列出合法值。",
+      "en": "Closes four billing and config defects: Anthropic prompt-cache counters were never billed (a request with 90000 cached-read and 4000 cache-write tokens recorded $0.0015 instead of ~$0.0435) and are now priced at 1.25x/0.1x the input rate with the full input token count recorded; the free /v1/messages/count_tokens was reserved and billed a fabricated 100 output tokens (and denied at the cap) and is now neither reserved nor billed; `fuse cap =0.001` rounded a positive cap to $0.00 and wrote an unloadable .fuse.toml, which is now rejected before writing; a misspelled provider (e.g. googel) loaded silently and let the client bypass the proxy, and now fails at load with the valid values listed."
+    },
     {
       "version": "v0.15.0",
       "zh": "修复三处计费与预留缺陷：deepseek 与 openai_compat 处理器此前忽略 max_completion_tokens（v0.14 只把三字段上限解析接进了 openai 处理器），客户端声明的输出上限会退回“补全≈提示”，使并发预留过小；`fuse init --cap 0`（或负数）会写出一个其余命令一律拒绝的 .fuse.toml 并以 0 退出，连它自己建议的 `fuse cap +5` 都无法恢复，现在 init 会在写入前校验上限；Gemini 免费的 :countTokens 端点此前会被预留并计费（按伪造的 100 个输出 token 计一次请求），预算耗尽时还会被直接拒绝，现在它既不预留也不计费，:generateContent 仍照常计费。",

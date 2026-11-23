@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -48,12 +49,31 @@ func FindProjectRoot(start string) string {
 // ValidateCapUSD is the single source of truth for the cap_usd > 0 rule: a
 // non-positive cap makes every handler deny (ReserveWindowed compares against
 // it) and Load refuses it, so a writer must never persist one. Load enforces it
-// on read and `fuse init` on write.
+// on read, `fuse init` on write, and Save on every other write path.
 func ValidateCapUSD(v float64) error {
 	if v <= 0 {
 		return fmt.Errorf("cap_usd must be > 0 (got %.2f)", v)
 	}
 	return nil
+}
+
+// Providers is the closed set of provider families the launcher can route (see
+// the switch in internal/cli/run.go). Config.Provider must name one of them.
+var Providers = []string{"anthropic", "openai", "gemini", "deepseek", "openai_compat"}
+
+// ValidateProvider is the single source of truth for the provider rule. The
+// launcher routes on this value with no fallback, so an unrecognised name leaves
+// the child talking to its own default endpoint — around the proxy, the ledger
+// and the cap. Load enforces it so a typo fails closed instead of silently
+// disabling enforcement.
+func ValidateProvider(v string) error {
+	for _, p := range Providers {
+		if v == p {
+			return nil
+		}
+	}
+	return fmt.Errorf("provider must be one of %s (got %q)",
+		strings.Join(Providers, ", "), v)
 }
 
 // Load reads the .fuse.toml at the given project root directory.
@@ -72,14 +92,23 @@ func Load(projectRoot string) (*Config, error) {
 	if cfg.Provider == "" {
 		cfg.Provider = "anthropic"
 	}
+	if err := ValidateProvider(cfg.Provider); err != nil {
+		return nil, err
+	}
 	if err := ValidateCapUSD(cfg.CapUSD); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-// Save writes the config atomically: write to .tmp then rename.
+// Save writes the config atomically: write to .tmp then rename. It refuses a
+// cap Load would reject, so no writer can strand a project with a .fuse.toml
+// that cannot be loaded (`fuse cap` used to round a positive cap to $0.00 and
+// persist it; init refuses to overwrite, so the file was unrecoverable in-CLI).
 func Save(path string, cfg *Config) error {
+	if err := ValidateCapUSD(cfg.CapUSD); err != nil {
+		return err
+	}
 	if cfg.Window == "" {
 		cfg.Window = "project"
 	}
